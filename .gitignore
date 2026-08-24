@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+.pytest_cache/
+.DS_Store
+
+# Model caches, downloads, and generated embeddings
+cache/
+data/
+downloads/
+*.npy
+*.pt
+*.onnx
