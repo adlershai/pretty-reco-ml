@@ -193,9 +193,9 @@ A model identifier looks like:
 Its images are:
 
 ```text
-https://media.adler.co.il/website/thumbnails/40724_001.jpg
-https://media.adler.co.il/website/thumbnails/40724_001_pers.jpg
-https://media.adler.co.il/website/thumbnails/40724_001_side.jpg
+https://media.adler.co.il/app/products/40724_001.jpg
+https://media.adler.co.il/app/products/40724_001_pers.jpg
+https://media.adler.co.il/app/products/40724_001_side.jpg
 ```
 
 The ML service will eventually receive a payload containing:

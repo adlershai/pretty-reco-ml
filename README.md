@@ -74,16 +74,61 @@ Linux:
 which python
 ```
 
-Install dependencies (none pinned yet):
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
+The first run downloads SigLIP weights into the local Hugging Face cache (outside Git).
+
 Smoke test:
 
 ```bash
-python embeddings/worker.py --version
+python -m embeddings.worker --version
+```
+
+## Image embeddings
+
+Packshot URLs in the JSON payload are encoded independently per view (`main`, `pers`, `side`). Views are not averaged. The worker does not invent URLs; callers pass explicit addresses. App product images use:
+
+```text
+https://media.adler.co.il/app/products/{model}.jpg
+https://media.adler.co.il/app/products/{model}_pers.jpg
+https://media.adler.co.il/app/products/{model}_side.jpg
+```
+
+| Field | Value |
+| --- | --- |
+| Model name | `google/siglip-base-patch16-224` (SigLIP) |
+| Source / library | Hugging Face `transformers` (`AutoModel.get_image_features`, `SiglipImageProcessorPil`) |
+| Embedding dimension | 768 |
+| License | Apache 2.0 |
+| Device | CUDA if available, otherwise CPU |
+| Python packages | `torch`, `transformers`, `Pillow`, `requests`, `numpy` |
+
+**Why SigLIP:** it is the preferred candidate in the task brief, has a stable open-source checkpoint, is commercially usable, runs on CPU for development, and produces a 768-d vector sized for product similarity without pulling in a giant So400m checkpoint.
+
+**Normalization:** SigLIP `get_image_features` does not return unit-length vectors. `VisionEncoder` L2-normalizes every embedding so cosine similarity equals a dot product. All images use the same preprocessing and normalization.
+
+Batch size defaults to 12 and is configurable with `--batch-size` or `EMBEDDING_BATCH_SIZE`.
+
+### Manual validation
+
+From the repo root, with `.venv` active:
+
+```bash
+python -m embeddings.worker examples/40724_001.json
+```
+
+Expected: three embeddings for `40724_001` (`main`, `pers`, `side`), exit code 0, and a single JSON object on stdout. Logs such as `vision device: cpu` go to stderr.
+
+If a view is missing on the CDN (CloudFront often returns HTTP 403 for absent objects), that view is recorded as `IMAGE_NOT_FOUND` and other views still succeed.
+
+Tests (downloads `40724_001` at runtime; the image is not committed):
+
+```bash
+python -m pytest
 ```
 
 ## Production
@@ -101,6 +146,4 @@ If 3.12.10 is not installed on the host, install it **alongside** system Python,
 
 ## Current scope
 
-The first ML capability is converting model packshots into image embeddings. Recommendation training, evaluation, inference, Weaviate, and database access are out of scope until that encoder is in place.
-
-Selecting and implementing the image embedding model is the next task.
+Image embeddings are implemented. Recommendation training, evaluation, inference, Weaviate, and database access remain out of scope.
