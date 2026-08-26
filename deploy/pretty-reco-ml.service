@@ -1,0 +1,16 @@
+[Unit]
+Description=Pretty Reco ML
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/pretty-reco-ml
+EnvironmentFile=-/home/ubuntu/pretty-reco-ml/.env
+ExecStart=/home/ubuntu/pretty-reco-ml/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

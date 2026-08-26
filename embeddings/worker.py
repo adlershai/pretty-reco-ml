@@ -122,6 +122,10 @@ def load_payload(path: Path) -> dict[str, Any]:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise PayloadError(f"malformed input JSON: {exc}") from exc
+    return parse_payload_object(data)
+
+
+def parse_payload_object(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or not isinstance(data.get("models"), list):
         raise PayloadError('unsupported payload structure: expected {"models": [...]}')
     return data
