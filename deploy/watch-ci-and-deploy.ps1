@@ -32,9 +32,12 @@ Write-Host "==> waiting for GitHub Actions run to start (up to ${StartTimeoutSec
 $deadline = (Get-Date).AddSeconds($StartTimeoutSec)
 $runId = $null
 while ((Get-Date) -lt $deadline) {
-    $json = & $Gh run list --workflow ci.yml --branch $Branch --commit $Commit --limit 1 --json databaseId,status,conclusion,url 2>$null
+    $json = & $Gh run list --workflow ci.yml --branch $Branch --limit 10 --json databaseId,status,conclusion,url,headSha 2>$null
     if ($json) {
-        $run = ($json | ConvertFrom-Json)[0]
+        $runs = @($json | ConvertFrom-Json)
+        $run = $runs | Where-Object {
+            $_.headSha -eq $Commit -or ($_.headSha -and $_.headSha.StartsWith($Commit))
+        } | Select-Object -First 1
         if ($run -and $run.databaseId) {
             $runId = $run.databaseId
             Write-Host "==> found run $($run.url)"
