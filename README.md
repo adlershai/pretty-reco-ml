@@ -37,6 +37,7 @@ MySQL
 - image preprocessing
 - vision encoding
 - embedding generation
+- training-data loading through the DB API (no direct MySQL)
 - later model training
 - later evaluation
 - later inference
@@ -173,6 +174,61 @@ This sits next to `pretty-crm-api`, `pretty-db-connect`, and `rrai-backend`. Do 
 
 System Python on adler remains 3.8.10. This app uses an isolated 3.12.10 interpreter (via uv) and `.venv`. On CPU hosts, install `torch` from the PyTorch CPU index so pip does not pull CUDA wheels.
 
+## Training dataset
+
+Training data is loaded from `https://db.adler-backend.com` (`DB_NAME=payments`). Python does **not** connect to MySQL.
+
+```bash
+python -m data.load_training_data
+python -m data.dataset_builder --latest
+python -m data.dataset_builder --snapshot snapshots/<timestamp>
+```
+
+Raw snapshots go to `snapshots/<timestamp>/` (`purchases.parquet`, `customers.parquet`, `models.parquet`, `metadata.json`). Sequential two-tower examples go to `snapshots/<timestamp>/dataset/` (`train.parquet`, `validation.parquet`, `test.parquet`, `dataset_metadata.json`). Generated snapshots are gitignored.
+
+Each training row is a positive pair: customer history **before** time T plus the model purchased at T. The first purchase per customer is kept in the raw snapshot for later cold-start use, but it is not a sequential training example. Missing target models and models without a usable visual vector are counted and excluded.
+
+Temporal split is by target purchase date. Set `TRAIN_END` and `VALIDATION_END` (or `--train-end` / `--validation-end`). If unset, the default is latest purchase date minus 120 / 60 days. If the snapshot is shorter than 120 days, unique-date quantiles (70% / 85%) are used instead.
+
+This step does not train a model.
+
+## Two-tower training
+
+Train the compact two-tower recommender from a prepared dataset (no MySQL):
+
+```bash
+python -m training.train --latest
+python -m training.train --snapshot snapshots/<timestamp> --compare 64,128
+python -m training.train --snapshot snapshots/<timestamp>/dataset --embedding-dim 128
+```
+
+Default comparison is 64D vs 128D. 256D is optional (`--include-256`). The selected artifact is written to `artifacts/the_pretty_model_v1/`. Training dumps stay gitignored; the promoted v1 weights are committed so Adler can serve ranking once the CRM API exists.
+
+CPU thread count defaults to `TORCH_NUM_THREADS=2`. CUDA is used when available. Early stopping watches validation Recall@10.
+
+After a customer purchase, re-run the Customer Tower only. After a new shoe is added, run the Model Tower only. Retrain both towers at end of season (or ~3–4k new purchases) and promote only if validation/test metrics improve.
+
+## New-model customer ranking
+
+Score current customers against cold-start new shoes with the frozen `the_pretty_model_v1` artifact. This does **not** retrain.
+
+```bash
+python -m inference.run --new-models path/to/load.csv --latest
+python -m inference.run --new-models path/to/load.csv --snapshot snapshots/<timestamp>
+```
+
+`--new-models` is a headerless CSV; column A is the model code. New catalog rows (visual + categoricals) are loaded through the DB API (`type=all` on `vw_reco_model_representation_v1`). Customer history comes from the latest snapshot. New model codes are not inserted into history.
+
+Writes gitignored files under `outputs/`:
+
+| File | Contents |
+| --- | --- |
+| `new_models_customer_ranking.csv` | Top 100 customers per new model (`similarity_score`, not a probability) |
+| `customer_new_model_matches.csv` | Top 6 new models per customer |
+| `new_models_top_customers.md` | Human Top 10 plus overlap / score summary |
+
+Historical shoe→customer Recall@K is **not** computed here: it would re-encode every candidate customer as-of each purchase T. Live ranking is the phase-3 deliverable.
+
 ## Current scope
 
-Image embeddings and the HTTP service are implemented. Recommendation training, evaluation, inference, Weaviate, and database access remain out of scope.
+Image embeddings and the HTTP embeddings service are in production. Two-tower V1, the DB API client, and ranking helpers are deployed so `pretty-crm-api` can call a ranking API once that contract is defined. Snapshots, ranking CSVs, and local caches stay gitignored. Weaviate, store UI, and automatic outreach remain out of scope.

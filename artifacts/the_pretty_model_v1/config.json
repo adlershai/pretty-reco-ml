@@ -1,0 +1,40 @@
+{
+  "embedding_dim": 64,
+  "hidden_dim": 128,
+  "visual_input_dim": 768,
+  "categorical_fields": [
+    "main_category",
+    "sub_category",
+    "material",
+    "material_1",
+    "material_2",
+    "theme",
+    "color",
+    "season",
+    "last_type"
+  ],
+  "numeric_feature_names": [
+    "log_purchase_count",
+    "log_history_length",
+    "log_recency_days",
+    "log_tenure_days",
+    "tenure_missing",
+    "full_price_ratio",
+    "discount_ratio",
+    "avg_discount"
+  ],
+  "max_history": 20,
+  "dropout": 0.1,
+  "temperature": 0.1,
+  "batch_size": 256,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "epochs": 15,
+  "patience": 3,
+  "seed": 42,
+  "num_threads": 2,
+  "age_embedding_dim": 8,
+  "loss": "in_batch_sampled_softmax",
+  "normalize": true,
+  "extra": {}
+}

@@ -9,7 +9,6 @@ __pycache__/
 
 # Model caches, downloads, and generated embeddings
 cache/
-data/
 downloads/
 .cache/
 huggingface/
@@ -17,3 +16,19 @@ huggingface/
 *.pt
 *.onnx
 *.safetensors
+# Promoted inference weights (needed on Adler for pretty-crm-api ranking)
+!artifacts/the_pretty_model_v1/model.pt
+
+# Generated training snapshots (keep the folder)
+snapshots/*
+!snapshots/.gitkeep
+
+# Local artifact dumps (keep the folder + promoted v1)
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/the_pretty_model_v1/
+!artifacts/the_pretty_model_v1/**
+
+# Ranking / inference exports (keep the folder)
+outputs/*
+!outputs/.gitkeep

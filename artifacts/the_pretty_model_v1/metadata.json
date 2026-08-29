@@ -1,0 +1,22 @@
+{
+  "model_version": "the_pretty_model_v1",
+  "training_timestamp": "2026-08-27T14:28:35.941551+00:00",
+  "snapshot": "C:\\Users\\LENOVO\\node-projects\\pretty-ballerinas\\pretty-reco-ml\\snapshots\\2026-08-27T080825",
+  "dataset": "C:\\Users\\LENOVO\\node-projects\\pretty-ballerinas\\pretty-reco-ml\\snapshots\\2026-08-27T080825\\dataset",
+  "train_row_count": 43130,
+  "validation_row_count": 914,
+  "test_row_count": 1065,
+  "catalog_models": 2620,
+  "selected_embedding_dim": 64,
+  "git_commit": "98b098000c8c7419eefdf9dbca9be4fe6131b652",
+  "python_version": "3.12.10",
+  "pytorch_version": "2.13.0+cpu",
+  "device": "cpu",
+  "loss": "in_batch_sampled_softmax",
+  "lifecycle": {
+    "new_or_updated_customer": "re-run Customer Tower only",
+    "new_model": "run Model Tower only",
+    "end_of_season": "retrain two towers on updated history, promote if better, regenerate all vectors",
+    "retrain_trigger": "~3,000\u20134,000 new purchases / end of season"
+  }
+}
