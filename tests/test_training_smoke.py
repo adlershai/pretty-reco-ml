@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from tests.two_tower_fixtures import make_model, tiny_batch
+from training.artifact import load_artifact, save_artifact
 from training.metrics import ranking_metrics
 from training.two_tower import in_batch_softmax_loss
 
@@ -27,3 +28,17 @@ def test_ranking_metrics_known_ranks() -> None:
     assert metrics["hit_rate@10"] == metrics["recall@10"]
     assert 0 < metrics["mrr"] < 1
     assert 0 < metrics["ndcg@10"] < 1
+
+
+def test_load_artifact_accepts_string_path(tmp_path) -> None:
+    model, encoders, config = make_model(8)
+    save_artifact(
+        artifact_dir=tmp_path / "v1",
+        model=model,
+        config=config,
+        encoders=encoders,
+        metrics={},
+        metadata={"selected_embedding_dim": 8},
+    )
+    loaded = load_artifact(str(tmp_path / "v1"))
+    assert loaded.config.embedding_dim == 8

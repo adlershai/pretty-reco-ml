@@ -15,13 +15,14 @@ from training.two_tower import TwoTowerModel
 
 def save_artifact(
     *,
-    artifact_dir: Path,
+    artifact_dir: Path | str,
     model: TwoTowerModel,
     config: TrainConfig,
     encoders: FeatureEncoders,
     metrics: dict[str, Any],
     metadata: dict[str, Any],
 ) -> None:
+    artifact_dir = Path(artifact_dir)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), artifact_dir / "model.pt")
     (artifact_dir / "config.json").write_text(json.dumps(config.to_dict(), indent=2) + "\n", encoding="utf-8")
@@ -30,7 +31,8 @@ def save_artifact(
     (artifact_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
 
-def load_artifact(artifact_dir: Path, device: torch.device | None = None) -> TwoTowerModel:
+def load_artifact(artifact_dir: Path | str, device: torch.device | None = None) -> TwoTowerModel:
+    artifact_dir = Path(artifact_dir)
     payload = json.loads((artifact_dir / "config.json").read_text(encoding="utf-8"))
     config = TrainConfig.from_embedding_dim(
         int(payload["embedding_dim"]),
