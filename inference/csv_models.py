@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from data.schemas import ANONYMOUS_CUSTOMER_ID
 
-ANONYMOUS_CUSTOMER_ID = "99999999"
+__all__ = ["ANONYMOUS_CUSTOMER_ID", "read_model_codes"]
 
 
 def read_model_codes(csv_path: Path) -> list[str]:

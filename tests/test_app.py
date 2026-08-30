@@ -29,6 +29,19 @@ class DummyEncoder:
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("RECO_API_KEY", "test-key")
     monkeypatch.setattr(app_module, "VisionEncoder", DummyEncoder)
+
+    class _StubRecommender:
+        model_version = "the_pretty_model_v1"
+        dimension = 64
+
+        @classmethod
+        def load(cls, **_kwargs: Any) -> _StubRecommender:
+            return cls()
+
+        def recommend(self, model_code: str, *, limit: int = 100) -> list[dict[str, Any]]:
+            return []
+
+    monkeypatch.setattr(app_module, "RecommenderService", _StubRecommender)
     with TestClient(app_module.app) as test_client:
         yield test_client
 
@@ -36,7 +49,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 def test_health_unauthenticated(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
 
 
 def test_embeddings_rejects_missing_key(client: TestClient) -> None:

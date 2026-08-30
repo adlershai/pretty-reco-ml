@@ -1,0 +1,160 @@
+"""Load production vectors and rank customers for a catalog model."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+
+from data.config import DEFAULT_SNAPSHOT_ROOT, REPO_ROOT
+from data.dataset_builder import find_latest_snapshot, load_snapshot_frames
+from data.db_client import DbApiClient
+from training.artifact import load_artifact
+from training.dataset import CatalogModel, load_catalog
+from training.trainer import select_device
+from training.two_tower import TwoTowerModel
+
+from inference.customers import build_current_customers, encode_customer_vectors
+from inference.models import catalog_from_rows, encode_catalog_models, fetch_model_representation
+from inference.ranking import rank_customers_for_model, score_matrix
+from inference.sanity import check_vectors
+
+logger = logging.getLogger("pretty-reco-ml.recommender")
+
+DEFAULT_ARTIFACT = REPO_ROOT / "artifacts" / "the_pretty_model_v1"
+MODEL_VERSION = "the_pretty_model_v1"
+DEFAULT_LIMIT = 100
+MAX_LIMIT = 200
+
+
+class ModelNotFoundError(LookupError):
+    """Requested model code is absent from the live catalog view."""
+
+
+class ModelNotEncodableError(ValueError):
+    """Model row exists but cannot be encoded (missing visual vector)."""
+
+
+@dataclass
+class RecommenderService:
+    tower: TwoTowerModel
+    catalog: dict[str, CatalogModel]
+    customer_ids: list[str]
+    customer_vectors: np.ndarray
+    db_client: DbApiClient
+    device: torch.device
+    model_version: str = MODEL_VERSION
+
+    @property
+    def dimension(self) -> int:
+        return int(self.tower.config.embedding_dim)
+
+    @classmethod
+    def load(
+        cls,
+        *,
+        artifact_dir: Path | None = None,
+        snapshot_dir: Path | None = None,
+        snapshot_root: Path | None = None,
+        device: torch.device | None = None,
+        db_client: DbApiClient | None = None,
+    ) -> RecommenderService:
+        artifact_path = (artifact_dir or DEFAULT_ARTIFACT).resolve()
+        metadata_path = artifact_path / "metadata.json"
+        if metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if str(metadata.get("model_version") or "") != MODEL_VERSION:
+                logger.warning(
+                    "artifact metadata model_version=%s, expected %s",
+                    metadata.get("model_version"),
+                    MODEL_VERSION,
+                )
+
+        resolved_snapshot = snapshot_dir or find_latest_snapshot(snapshot_root or DEFAULT_SNAPSHOT_ROOT)
+        resolved_device = device or select_device()
+        tower = load_artifact(artifact_path, device=resolved_device)
+        dim = int(tower.config.embedding_dim)
+
+        purchases, customers, _models = load_snapshot_frames(resolved_snapshot.resolve())
+        catalog = load_catalog(resolved_snapshot.resolve())
+        records, stats = build_current_customers(
+            purchases,
+            customers,
+            catalog,
+            new_model_codes=set(),
+        )
+        logger.info(
+            "recommender snapshot=%s customers=%s catalog=%s",
+            resolved_snapshot.name,
+            stats["encoded_customers"],
+            len(catalog),
+        )
+        customer_vectors = encode_customer_vectors(tower, records, catalog, device=resolved_device)
+        check_vectors(customer_vectors, dim=dim, name="customer_vectors")
+        customer_ids = [str(record["customer_id"]) for record in records]
+        return cls(
+            tower=tower,
+            catalog=catalog,
+            customer_ids=customer_ids,
+            customer_vectors=customer_vectors,
+            db_client=db_client or DbApiClient(),
+            device=resolved_device,
+        )
+
+    def _resolve_model_catalog(self, model_code: str) -> CatalogModel:
+        code = str(model_code or "").strip()
+        if not code:
+            raise ModelNotFoundError(code)
+        rows = fetch_model_representation(self.db_client, [code])
+        if not rows:
+            raise ModelNotFoundError(code)
+        live_catalog = catalog_from_rows(rows)
+        if code not in live_catalog:
+            raise ModelNotEncodableError(code)
+        return live_catalog[code]
+
+    def recommend(self, model_code: str, *, limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
+        code = str(model_code or "").strip()
+        item = self._resolve_model_catalog(code)
+        working_catalog = dict(self.catalog)
+        working_catalog[code] = item
+        model_vectors, encoded_codes = encode_catalog_models(
+            self.tower,
+            working_catalog,
+            [code],
+            device=self.device,
+        )
+        if not encoded_codes:
+            raise ModelNotEncodableError(code)
+        check_vectors(model_vectors, dim=self.dimension, name="model_vectors")
+        scores = score_matrix(self.customer_vectors, model_vectors)[:, 0]
+        ranked = rank_customers_for_model(scores, self.customer_ids, top_k=limit)
+        return [
+            {
+                "customer_id": _customer_id_value(row["customer_id"]),
+                "similarity_score": round(float(row["similarity_score"]), 4),
+                "rank": int(row["rank"]),
+            }
+            for row in ranked
+        ]
+
+
+def normalize_limit(limit: int | None) -> int:
+    """Default 100, cap at 200. Values below 1 raise ValueError."""
+    if limit is None:
+        return DEFAULT_LIMIT
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    return min(int(limit), MAX_LIMIT)
+
+
+def _customer_id_value(raw: str) -> int:
+    text = str(raw).strip()
+    if not text.isdigit():
+        raise ValueError(f"customer_id is not numeric: {raw!r}")
+    return int(text)

@@ -12,14 +12,22 @@ import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from embeddings.contract import EmbeddingsRequest, EmbeddingsResponse
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
+from inference.recommender import (
+    MODEL_VERSION,
+    ModelNotEncodableError,
+    ModelNotFoundError,
+    RecommenderService,
+    normalize_limit,
+)
 
 logger = logging.getLogger("pretty-reco-ml.app")
 
@@ -60,10 +68,19 @@ async def require_api_key(x_api_key: str | None = Header(default=None, alias="X-
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("loading vision encoder")
     app.state.encoder = VisionEncoder()
+    logger.info("loading recommender")
+    app.state.recommender = RecommenderService.load()
     yield
 
 
 app = FastAPI(title="pretty-reco-ml", lifespan=lifespan)
+
+
+def _recommender(request: Request) -> RecommenderService:
+    recommender: RecommenderService | None = getattr(request.app.state, "recommender", None)
+    if recommender is None:
+        raise HTTPException(status_code=503, detail="recommender is not loaded")
+    return recommender
 
 
 @app.exception_handler(RequestValidationError)
@@ -72,8 +89,38 @@ async def invalid_payload(_request: Request, _exc: RequestValidationError) -> JS
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health(request: Request) -> dict[str, Any]:
+    recommender: RecommenderService | None = getattr(request.app.state, "recommender", None)
+    payload: dict[str, Any] = {"status": "ok"}
+    if recommender is not None:
+        payload["model"] = MODEL_VERSION
+        payload["dimension"] = recommender.dimension
+    return payload
+
+
+@app.exception_handler(ModelNotFoundError)
+async def model_not_found(_request: Request, exc: ModelNotFoundError) -> JSONResponse:
+    model = str(exc.args[0]) if exc.args else ""
+    return JSONResponse(status_code=404, content={"error": "model_not_found", "model": model})
+
+
+@app.exception_handler(ModelNotEncodableError)
+async def model_not_encodable(_request: Request, exc: ModelNotEncodableError) -> JSONResponse:
+    model = str(exc.args[0]) if exc.args else ""
+    return JSONResponse(status_code=422, content={"error": "model_not_encodable", "model": model})
+
+
+@app.get("/recommend/customers/{model}")
+def recommend_customers(
+    model: str,
+    limit: int | None = Query(default=None),
+    recommender: RecommenderService = Depends(_recommender),
+) -> list[dict[str, Any]]:
+    try:
+        effective_limit = normalize_limit(limit)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="limit must be >= 1") from None
+    return recommender.recommend(model, limit=effective_limit)
 
 
 @app.post("/embeddings/models", response_model=EmbeddingsResponse)

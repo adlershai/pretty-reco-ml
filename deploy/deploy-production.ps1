@@ -67,13 +67,13 @@ Invoke-Remote 'sudo systemctl reset-failed pretty-reco-ml.service 2>/dev/null; s
 
 Write-Host '==> wait for /health'
 $healthCmd = @'
-for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+for i in $(seq 1 30); do
   if curl -sf http://127.0.0.1:8000/health >/dev/null; then
     curl -sf http://127.0.0.1:8000/health
     echo
     exit 0
   fi
-  sleep 3
+  sleep 5
 done
 echo 'health check failed' >&2
 journalctl -u pretty-reco-ml.service -n 40 --no-pager >&2

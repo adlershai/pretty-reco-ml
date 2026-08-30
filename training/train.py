@@ -23,6 +23,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.config import DEFAULT_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
+from data.schemas import OBSERVATION_START
 from training.config import (
     DEFAULT_EMBEDDING_DIMS,
     EXPLORATORY_EMBEDDING_DIM,
@@ -231,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     chosen = trained[int(selected["embedding_dim"])]
     artifact_dir = args.artifact_dir
     metadata = {
-        "model_version": "the_pretty_model_v1",
+        "model_version": artifact_dir.name,
         "training_timestamp": datetime.now(timezone.utc).isoformat(),
         "snapshot": str(snapshot_dir),
         "dataset": str(dataset_dir),
@@ -240,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         "test_row_count": int(len(test_frame)),
         "catalog_models": int(len(catalog)),
         "selected_embedding_dim": int(selected["embedding_dim"]),
+        "observation_start": OBSERVATION_START,
         "git_commit": git_commit(),
         "python_version": platform.python_version(),
         "pytorch_version": torch.__version__,

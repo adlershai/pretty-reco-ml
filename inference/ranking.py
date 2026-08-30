@@ -23,6 +23,30 @@ def score_matrix(customer_vectors: np.ndarray, model_vectors: np.ndarray) -> np.
     return customer_vectors @ model_vectors.T
 
 
+def rank_customers_for_model(
+    scores: np.ndarray,
+    customer_ids: Sequence[str],
+    *,
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """Rank customers for a single model column (1D scores)."""
+    column = np.asarray(scores, dtype=np.float32).reshape(-1)
+    n_customers = column.shape[0]
+    if n_customers == 0:
+        return []
+    k = min(int(top_k), n_customers)
+    index = np.argpartition(-column, kth=k - 1)[:k]
+    index = index[np.argsort(-column[index], kind="mergesort")]
+    return [
+        {
+            "customer_id": str(customer_ids[int(row_index)]),
+            "similarity_score": float(column[int(row_index)]),
+            "rank": int(rank),
+        }
+        for rank, row_index in enumerate(index, start=1)
+    ]
+
+
 def rank_customers_for_models(
     scores: np.ndarray,
     customer_ids: Sequence[str],

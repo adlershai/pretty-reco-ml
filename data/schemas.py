@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Iterable
 
+ANONYMOUS_CUSTOMER_ID = "99999999"
+OBSERVATION_START = "2019-01-01"
+# Same bounds as the_pretty_model_v1 (latest purchase −120d / −60d).
+V1_TRAIN_END = "2026-04-27T21:00:00+00:00"
+V1_VALIDATION_END = "2026-06-26T21:00:00+00:00"
+
 PURCHASE_VIEW = "vw_reco_purchase_events_v1"
 CUSTOMER_VIEW = "vw_reco_customer_representation_v1"
 MODEL_VIEW = "vw_reco_model_representation_v1"

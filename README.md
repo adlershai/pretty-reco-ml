@@ -101,7 +101,8 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 
 | Endpoint | Auth | Purpose |
 | --- | --- | --- |
-| `GET /health` | none | `{"status":"ok"}` |
+| `GET /health` | none | service status, model version, vector dimension |
+| `GET /recommend/customers/{model}` | none | ranked customer IDs for a model (`?limit=1–200`, default 100) |
 | `POST /embeddings/models` | header `X-API-Key` | same JSON contract as the CLI worker |
 
 Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key.
@@ -185,6 +186,13 @@ python -m data.dataset_builder --snapshot snapshots/<timestamp>
 ```
 
 Raw snapshots go to `snapshots/<timestamp>/` (`purchases.parquet`, `customers.parquet`, `models.parquet`, `metadata.json`). Sequential two-tower examples go to `snapshots/<timestamp>/dataset/` (`train.parquet`, `validation.parquet`, `test.parquet`, `dataset_metadata.json`). Generated snapshots are gitignored.
+
+ML purchase history starts on **2019-01-01**. Pre-2019 rows are dropped before sequential examples and live customer encoding. Rebuild a side-by-side dataset without overwriting V1:
+
+```bash
+python -m data.dataset_builder --snapshot snapshots/<timestamp> --output-dirname dataset_2019 --train-end 2026-04-27T21:00:00+00:00 --validation-end 2026-06-26T21:00:00+00:00
+python -m training.train --snapshot snapshots/<timestamp>/dataset_2019 --embedding-dim 64 --artifact-dir artifacts/the_pretty_model_2019_v1
+```
 
 Each training row is a positive pair: customer history **before** time T plus the model purchased at T. The first purchase per customer is kept in the raw snapshot for later cold-start use, but it is not a sequential training example. Missing target models and models without a usable visual vector are counted and excluded.
 

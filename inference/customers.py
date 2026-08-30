@@ -16,6 +16,7 @@ from data.dataset_builder import (
     is_discount_purchase,
     json_safe,
     normalize_id,
+    observed_tenure_days,
     prepare_purchases,
 )
 from training.config import TrainConfig
@@ -132,12 +133,8 @@ def build_current_customers(
         purchase_count = len(history_ids)
         total_priced = full_price_count + discount_count
         static = dict(static_map.get(cid) or {})
-        join_raw = static.get("join_date")
-        join_date = pd.to_datetime(join_raw, utc=True, errors="coerce") if join_raw else pd.NaT
-        tenure_days = (
-            float((moment - join_date).total_seconds() / 86400.0) if pd.notna(join_date) else None
-        )
-        static["tenure_days"] = tenure_days
+        first_observed = rows[0]["purchase_date"] if rows else None
+        static["tenure_days"] = observed_tenure_days(moment, first_observed)
         behavior = {
             "purchase_count_before": purchase_count,
             "history_length": purchase_count,

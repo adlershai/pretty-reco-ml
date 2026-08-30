@@ -28,9 +28,15 @@ def resolve_snapshot_paths(snapshot: Path) -> tuple[Path, Path]:
     snapshot = snapshot.resolve()
     if (snapshot / DATASET_TRAIN).is_file():
         dataset_dir = snapshot
-        snapshot_dir = snapshot.parent if snapshot.name == "dataset" else snapshot
-        if not (snapshot_dir / SNAPSHOT_MODELS).is_file() and (snapshot / SNAPSHOT_MODELS).is_file():
-            snapshot_dir = snapshot
+        snapshot_dir = snapshot
+        cursor = snapshot
+        for _ in range(4):
+            if (cursor / SNAPSHOT_MODELS).is_file():
+                snapshot_dir = cursor
+                break
+            if cursor.parent == cursor:
+                break
+            cursor = cursor.parent
         return snapshot_dir, dataset_dir
     dataset_dir = snapshot / "dataset"
     if not (dataset_dir / DATASET_TRAIN).is_file():

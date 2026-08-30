@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from inference.csv_models import ANONYMOUS_CUSTOMER_ID, read_model_codes
 from inference.customers import build_current_customers
@@ -162,8 +163,67 @@ def test_build_current_customers_excludes_anonymous_and_new_models() -> None:
     assert records[0]["preferred_size"] == "37"
     check_history_excludes_new_models(records, {"NEW1"})
     assert stats["encoded_customers"] == 1
-    assert stats["reason_counts"]["anonymous"] == 1
+    assert stats["reason_counts"].get("anonymous", 0) == 0
     assert stats["reason_counts"]["no_purchases"] == 2
     assert stats["reason_counts"]["no_catalog_history"] == 1
-    assert stats["excluded_customers"] == 4
+    assert stats["excluded_customers"] == 3
     assert ANONYMOUS_CUSTOMER_ID not in {row["customer_id"] for row in records}
+
+
+def test_live_ranking_keeps_one_post_2019_purchase_and_drops_pre_2019() -> None:
+    purchases = pd.DataFrame(
+        [
+            {
+                "purchase_id": 1,
+                "invoice_number": "A",
+                "purchase_date": "2018-05-01",
+                "customer_id": "500",
+                "model": "ANCIENT",
+                "sku": "s0",
+                "size": "37",
+                "quantity": 1,
+                "discount": 0,
+                "season": "W18",
+                "last_name": "Old",
+            },
+            {
+                "purchase_id": 2,
+                "invoice_number": "B",
+                "purchase_date": "2021-05-01",
+                "customer_id": "500",
+                "model": "OLD1",
+                "sku": "s1",
+                "size": "37",
+                "quantity": 1,
+                "discount": 0,
+                "season": "W21",
+                "last_name": "Old",
+            },
+        ]
+    )
+    customers = pd.DataFrame(
+        [
+            {
+                "customer_id": "500",
+                "age_group": "40-49",
+                "join_date": "2010-01-01",
+                "preferred_size": "37",
+                "history_confidence": "low",
+                "join_shop_id": 1,
+                "agent_id": 2,
+                "birthday_year": 1980,
+            }
+        ]
+    )
+    records, _stats = build_current_customers(
+        purchases,
+        customers,
+        _catalog("OLD1", "ANCIENT"),
+        new_model_codes=set(),
+        now=datetime(2026, 4, 1, tzinfo=timezone.utc),
+    )
+    assert len(records) == 1
+    assert records[0]["history_model_ids"] == ["OLD1"]
+    assert records[0]["history_length"] == 1
+    assert "ANCIENT" not in records[0]["history_model_ids"]
+    assert records[0]["static"]["tenure_days"] == pytest.approx(1796, abs=2)

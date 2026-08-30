@@ -23,6 +23,7 @@ import pandas as pd
 
 from data.config import DEFAULT_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
 from data.schemas import (
+    ANONYMOUS_CUSTOMER_ID,
     CUSTOMER_COLUMNS,
     DATASET_DIRNAME,
     DATASET_METADATA,
@@ -35,6 +36,7 @@ from data.schemas import (
     DEFAULT_VALIDATION_QUANTILE,
     MODEL_COLUMNS,
     MODEL_FEATURE_COLUMNS,
+    OBSERVATION_START,
     PURCHASE_COLUMNS,
     SNAPSHOT_CUSTOMERS,
     SNAPSHOT_METADATA,
@@ -145,6 +147,25 @@ def json_safe(value: Any) -> Any:
     return value
 
 
+def as_utc(value: Any) -> pd.Timestamp:
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is None:
+        return stamp.tz_localize("UTC")
+    return stamp.tz_convert("UTC")
+
+
+def observation_start_ts(start: str | pd.Timestamp | None = None) -> pd.Timestamp:
+    return as_utc(start or OBSERVATION_START)
+
+
+def observed_tenure_days(at: pd.Timestamp, first_observed: Any) -> float | None:
+    """History duration from the first ML-visible purchase, not pre-2019 join tenure."""
+    if first_observed is None or _is_null(first_observed):
+        return None
+    days = (as_utc(at) - as_utc(first_observed)).total_seconds() / 86400.0
+    return max(float(days), 0.0)
+
+
 def parse_datetime_series(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series, utc=True, errors="coerce")
 
@@ -248,6 +269,14 @@ def prepare_purchases(purchases: pd.DataFrame) -> pd.DataFrame:
     frame["model"] = frame["model"].map(normalize_id)
     frame["purchase_date"] = parse_datetime_series(frame["purchase_date"])
     frame = frame[frame["customer_id"].notna() & frame["model"].notna() & frame["purchase_date"].notna()]
+    frame = frame[frame["customer_id"] != ANONYMOUS_CUSTOMER_ID]
+    frame = frame[frame["purchase_date"] >= observation_start_ts()]
+    if "quantity" in frame.columns:
+        quantity = pd.to_numeric(frame["quantity"], errors="coerce")
+        frame = frame[quantity > 0]
+    if "paid_amount" in frame.columns:
+        paid = pd.to_numeric(frame["paid_amount"], errors="coerce")
+        frame = frame[paid > 0]
     sort_columns = ["customer_id", "purchase_date"]
     for column in TIE_BREAK_COLUMNS:
         if column in frame.columns:
@@ -296,11 +325,8 @@ def build_sequential_examples(
                     recency_days = _days_between(target_date, last_history_date)
                     purchase_count_before = len(history_models)
                     total_priced = full_price_count + discount_count
-                    join_raw = (customer_static.get(str(customer_id)) or {}).get("join_date")
-                    join_date = pd.to_datetime(join_raw, utc=True, errors="coerce") if join_raw else pd.NaT
-                    tenure_days = (
-                        _days_between(target_date, join_date) if pd.notna(join_date) else None
-                    )
+                    first_observed = pd.Timestamp(rows[0]["purchase_date"]) if history_models else None
+                    tenure_days = observed_tenure_days(target_date, first_observed)
                     static_features = dict(customer_static.get(str(customer_id)) or {})
                     static_features["tenure_days"] = tenure_days
                     behavior = {
@@ -505,6 +531,7 @@ def build_quality_report(
         "train_end": train_end.isoformat(),
         "validation_end": validation_end.isoformat(),
         "split_strategy": split_strategy,
+        "observation_start": observation_start_ts().isoformat(),
         "total_purchases_loaded": int(len(purchases)),
         "total_customers_loaded": int(len(customers)),
         "total_models_loaded": int(len(models)),
@@ -556,6 +583,7 @@ def format_quality_report(report: dict[str, Any]) -> str:
         f"validation rows: {report['validation_rows']}",
         f"test rows: {report['test_rows']}",
         f"split strategy: {report['split_strategy']}",
+        f"observation start: {report.get('observation_start')}",
         f"TRAIN_END: {report['train_end']}",
         f"VALIDATION_END: {report['validation_end']}",
         "",
@@ -593,6 +621,7 @@ def build_dataset(
     *,
     train_end: str | None = None,
     validation_end: str | None = None,
+    output_dirname: str = DATASET_DIRNAME,
 ) -> Path:
     snapshot_dir = snapshot_dir.resolve()
     purchases_raw, customers_raw, models_raw = load_snapshot_frames(snapshot_dir)
@@ -627,7 +656,9 @@ def build_dataset(
         validation_end=split_validation_end,
         split_strategy=strategy,
     )
-    output_dir = snapshot_dir / DATASET_DIRNAME
+    report["raw_purchases_in_snapshot"] = int(len(purchases_raw))
+    report["purchases_dropped_before_observation"] = int(len(purchases_raw) - len(purchases)) if not purchases_raw.empty else 0
+    output_dir = snapshot_dir / output_dirname
     write_dataset_frames(output_dir, train, validation, test, report)
     print(format_quality_report(report))
     return output_dir
@@ -645,6 +676,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--train-end", help="Inclusive end date for the train split (YYYY-MM-DD)")
     parser.add_argument("--validation-end", help="Inclusive end date for the validation split (YYYY-MM-DD)")
+    parser.add_argument(
+        "--output-dirname",
+        default=DATASET_DIRNAME,
+        help="Directory name under the snapshot for train/validation/test parquet",
+    )
     return parser.parse_args(argv)
 
 
@@ -667,6 +703,7 @@ def main(argv: list[str] | None = None) -> int:
             snapshot_dir,
             train_end=train_end,
             validation_end=validation_end,
+            output_dirname=args.output_dirname,
         )
     except (FileNotFoundError, SchemaError, ValueError, OSError) as exc:
         logger.error("%s", exc)

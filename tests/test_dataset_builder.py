@@ -340,3 +340,47 @@ def test_write_snapshot_and_build_dataset(tmp_path: Path) -> None:
     assert validation.empty
     assert isinstance(train.iloc[0]["target_visual_embedding"], (list, np.ndarray))
     np.testing.assert_allclose(np.linalg.norm(train.iloc[0]["target_visual_embedding"]), 1.0, rtol=1e-5)
+
+
+def test_pre_2019_purchases_are_dropped_from_history() -> None:
+    embedding = _embedding([1.0, 0.0, 0.0, 0.0])
+    purchases = [
+        _purchase_row(1, 1, "OLD", "2018-06-01"),
+        _purchase_row(2, 1, "A", "2019-06-01"),
+        _purchase_row(3, 1, "B", "2020-06-01"),
+        _purchase_row(4, 2, "A", "2017-01-01"),
+    ]
+    models = [_model_row(code, embedding) for code in ("OLD", "A", "B")]
+    examples, _counts = _examples_from_rows(purchases, models, [_customer_row(1, join_date="2010-01-01")])
+    assert list(examples["target_model"]) == ["B"]
+    assert examples.iloc[0]["history_model_ids"] == ["A"]
+    behavior = json.loads(examples.iloc[0]["customer_behavior_features"])
+    static = json.loads(examples.iloc[0]["customer_static_features"])
+    assert behavior["purchase_count_before"] == 1
+    assert static["tenure_days"] == pytest.approx(366, abs=2)
+
+
+def test_single_post_2019_purchase_is_not_a_training_example() -> None:
+    embedding = _embedding([0.0, 1.0, 0.0, 0.0])
+    purchases = [
+        _purchase_row(1, 9, "A", "2018-01-01"),
+        _purchase_row(2, 9, "B", "2020-01-01"),
+    ]
+    models = [_model_row("A", embedding), _model_row("B", embedding)]
+    examples, _counts = _examples_from_rows(purchases, models)
+    assert examples.empty
+
+
+def test_anonymous_and_zero_quantity_are_dropped() -> None:
+    embedding = _embedding([0.0, 0.0, 1.0, 0.0])
+    purchases = [
+        _purchase_row(1, "99999999", "A", "2020-01-01"),
+        _purchase_row(2, 3, "A", "2020-01-01", quantity=0),
+        _purchase_row(3, 3, "B", "2021-01-01"),
+        _purchase_row(4, 3, "C", "2022-01-01"),
+    ]
+    models = [_model_row(code, embedding) for code in ("A", "B", "C")]
+    examples, _counts = _examples_from_rows(purchases, models)
+    assert list(examples["customer_id"].unique()) == ["3"]
+    assert examples.iloc[0]["history_model_ids"] == ["B"]
+
