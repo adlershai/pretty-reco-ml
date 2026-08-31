@@ -20,8 +20,10 @@ from training.trainer import select_device
 from training.two_tower import TwoTowerModel
 
 from inference.customers import build_current_customers, encode_customer_vectors
+from inference.like_score import LikeCalibrator, load_calibrator
 from inference.models import catalog_from_rows, encode_catalog_models, fetch_model_representation
-from inference.ranking import rank_customers_for_model, score_matrix
+from inference.ranking import score_matrix
+from inference.recency import rank_customers_with_recency
 from inference.sanity import check_vectors
 
 logger = logging.getLogger("pretty-reco-ml.recommender")
@@ -46,8 +48,10 @@ class RecommenderService:
     catalog: dict[str, CatalogModel]
     customer_ids: list[str]
     customer_vectors: np.ndarray
+    last_purchase_dates: list[str | None]
     db_client: DbApiClient
     device: torch.device
+    like_calibrator: LikeCalibrator
     model_version: str = MODEL_VERSION
 
     @property
@@ -97,13 +101,17 @@ class RecommenderService:
         customer_vectors = encode_customer_vectors(tower, records, catalog, device=resolved_device)
         check_vectors(customer_vectors, dim=dim, name="customer_vectors")
         customer_ids = [str(record["customer_id"]) for record in records]
+        last_purchase_dates = [record.get("last_purchase_date") for record in records]
+        like_calibrator = load_calibrator(artifact_path)
         return cls(
             tower=tower,
             catalog=catalog,
             customer_ids=customer_ids,
             customer_vectors=customer_vectors,
+            last_purchase_dates=last_purchase_dates,
             db_client=db_client or DbApiClient(),
             device=resolved_device,
+            like_calibrator=like_calibrator,
         )
 
     def _resolve_model_catalog(self, model_code: str) -> CatalogModel:
@@ -118,7 +126,7 @@ class RecommenderService:
             raise ModelNotEncodableError(code)
         return live_catalog[code]
 
-    def recommend(self, model_code: str, *, limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
+    def score_model(self, model_code: str) -> np.ndarray:
         code = str(model_code or "").strip()
         item = self._resolve_model_catalog(code)
         working_catalog = dict(self.catalog)
@@ -132,12 +140,31 @@ class RecommenderService:
         if not encoded_codes:
             raise ModelNotEncodableError(code)
         check_vectors(model_vectors, dim=self.dimension, name="model_vectors")
-        scores = score_matrix(self.customer_vectors, model_vectors)[:, 0]
-        ranked = rank_customers_for_model(scores, self.customer_ids, top_k=limit)
+        return score_matrix(self.customer_vectors, model_vectors)[:, 0]
+
+    def recommend(self, model_code: str, *, limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
+        scores = self.score_model(model_code)
+        like_scores = self.like_calibrator.transform(scores)
+        ranked, diagnostics = rank_customers_with_recency(
+            scores,
+            self.customer_ids,
+            self.last_purchase_dates,
+            like_scores=like_scores,
+            top_k=limit,
+        )
+        logger.info(
+            "recommend model=%s scored=%s excluded_lt_60d=%s eligible=%s returned=%s dist=%s",
+            str(model_code).strip(),
+            diagnostics["total_scored"],
+            diagnostics["excluded_lt_60d"],
+            diagnostics["eligible"],
+            diagnostics["returned"],
+            diagnostics["returned_distribution"],
+        )
         return [
             {
                 "customer_id": _customer_id_value(row["customer_id"]),
-                "similarity_score": round(float(row["similarity_score"]), 4),
+                "like_score": round(float(row["like_score"]), 4),
                 "rank": int(row["rank"]),
             }
             for row in ranked

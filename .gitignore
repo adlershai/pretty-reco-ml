@@ -7,7 +7,7 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
-# Model caches, downloads, and generated embeddings
+# Hugging Face / torch caches if they land in the repo root
 cache/
 downloads/
 .cache/
@@ -19,16 +19,18 @@ huggingface/
 # Promoted inference weights (needed on Adler for pretty-crm-api ranking)
 !artifacts/the_pretty_model_v1/model.pt
 
-# Generated training snapshots (keep the folder)
+# All generated local data: snapshots, ranking dumps, extra artifacts
+local/*
+!local/.gitkeep
+
+# Legacy locations (ignored if an old checkout still has them)
 snapshots/*
 !snapshots/.gitkeep
+outputs/*
+!outputs/.gitkeep
 
 # Local artifact dumps (keep the folder + promoted v1)
 artifacts/*
 !artifacts/.gitkeep
 !artifacts/the_pretty_model_v1/
 !artifacts/the_pretty_model_v1/**
-
-# Ranking / inference exports (keep the folder)
-outputs/*
-!outputs/.gitkeep

@@ -44,7 +44,7 @@ class FakeRecommender:
             rows.append(
                 {
                     "customer_id": 40_000_000 + rank,
-                    "similarity_score": round(1.0 - rank * 0.001, 4),
+                    "like_score": round(1.0 - rank * 0.001, 4),
                     "rank": rank,
                 }
             )
@@ -95,7 +95,7 @@ def test_recommend_limit_above_200_is_capped(client: TestClient) -> None:
 
 def test_recommend_scores_descend(client: TestClient) -> None:
     body = client.get("/recommend/customers/53165_003?limit=10").json()
-    scores = [row["similarity_score"] for row in body]
+    scores = [row["like_score"] for row in body]
     assert scores == sorted(scores, reverse=True)
 
 
@@ -112,10 +112,11 @@ def test_recommend_customer_ids_are_unique(client: TestClient) -> None:
 
 def test_recommend_response_fields_only(client: TestClient) -> None:
     row = client.get("/recommend/customers/53165_003?limit=1").json()[0]
-    assert set(row.keys()) == {"customer_id", "similarity_score", "rank"}
+    assert set(row.keys()) == {"customer_id", "like_score", "rank"}
     assert isinstance(row["customer_id"], int)
-    assert isinstance(row["similarity_score"], float)
+    assert isinstance(row["like_score"], float)
     assert isinstance(row["rank"], int)
+    assert 0.0 <= row["like_score"] <= 1.0
 
 
 def test_recommend_unknown_model_returns_404(client: TestClient) -> None:

@@ -1,9 +1,9 @@
 """Train and compare compact two-tower recommenders.
 
 Usage:
-    python -m training.train --snapshot snapshots/<timestamp>
-    python -m training.train --snapshot snapshots/<timestamp>/dataset --embedding-dim 128
-    python -m training.train --snapshot snapshots/<timestamp> --compare 64,128
+    python -m training.train --snapshot local/snapshots/<timestamp>
+    python -m training.train --snapshot local/snapshots/<timestamp>/dataset --embedding-dim 128
+    python -m training.train --snapshot local/snapshots/<timestamp> --compare 64,128
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
-from data.config import DEFAULT_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
+from data.config import DEFAULT_SNAPSHOT_ROOT, LEGACY_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
 from data.schemas import OBSERVATION_START
 from training.config import (
     DEFAULT_EMBEDDING_DIMS,
@@ -104,7 +104,7 @@ def select_dimension(results: list[dict[str, Any]]) -> dict[str, Any]:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the pretty two-tower recommender V1.")
     parser.add_argument("--snapshot", type=Path, help="Snapshot directory or dataset directory")
-    parser.add_argument("--latest", action="store_true", help="Use the newest snapshot under snapshots/")
+    parser.add_argument("--latest", action="store_true", help="Use the newest snapshot under local/snapshots/")
     parser.add_argument("--embedding-dim", type=int, help="Train a single embedding dimension")
     parser.add_argument("--compare", default="", help="Comma-separated dims to compare, e.g. 64,128")
     parser.add_argument("--include-256", action="store_true", help="Also train the exploratory 256D model")
@@ -136,7 +136,16 @@ def dims_from_args(args: argparse.Namespace) -> list[int]:
 
 
 def latest_snapshot(root: Path) -> Path:
-    candidates = [path for path in root.iterdir() if path.is_dir() and (path / "dataset" / "train.parquet").is_file()]
+    roots = [root]
+    if Path(root).resolve() == DEFAULT_SNAPSHOT_ROOT.resolve():
+        roots.append(LEGACY_SNAPSHOT_ROOT)
+    candidates: list[Path] = []
+    for folder in roots:
+        if not folder.is_dir():
+            continue
+        candidates.extend(
+            path for path in folder.iterdir() if path.is_dir() and (path / "dataset" / "train.parquet").is_file()
+        )
     if not candidates:
         raise FileNotFoundError(f"no dataset snapshots under {root}")
     return max(candidates, key=lambda path: path.name)

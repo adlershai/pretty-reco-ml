@@ -102,7 +102,7 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | Endpoint | Auth | Purpose |
 | --- | --- | --- |
 | `GET /health` | none | service status, model version, vector dimension |
-| `GET /recommend/customers/{model}` | none | ranked customer IDs for a model (`?limit=1–200`, default 100) |
+| `GET /recommend/customers/{model}` | none | ranked customer IDs (`?limit=1–200`, default 100). Last purchase under 60 days is excluded, then sort by `like_score` (0–1 taste affinity). |
 | `POST /embeddings/models` | header `X-API-Key` | same JSON contract as the CLI worker |
 
 Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key.
@@ -182,16 +182,16 @@ Training data is loaded from `https://db.adler-backend.com` (`DB_NAME=payments`)
 ```bash
 python -m data.load_training_data
 python -m data.dataset_builder --latest
-python -m data.dataset_builder --snapshot snapshots/<timestamp>
+python -m data.dataset_builder --snapshot local/snapshots/<timestamp>
 ```
 
-Raw snapshots go to `snapshots/<timestamp>/` (`purchases.parquet`, `customers.parquet`, `models.parquet`, `metadata.json`). Sequential two-tower examples go to `snapshots/<timestamp>/dataset/` (`train.parquet`, `validation.parquet`, `test.parquet`, `dataset_metadata.json`). Generated snapshots are gitignored.
+Raw snapshots go to `local/snapshots/<timestamp>/` (`purchases.parquet`, `customers.parquet`, `models.parquet`, `metadata.json`). Sequential two-tower examples go to `local/snapshots/<timestamp>/dataset/`. Generated local data is gitignored under `local/`.
 
 ML purchase history starts on **2019-01-01**. Pre-2019 rows are dropped before sequential examples and live customer encoding. Rebuild a side-by-side dataset without overwriting V1:
 
 ```bash
-python -m data.dataset_builder --snapshot snapshots/<timestamp> --output-dirname dataset_2019 --train-end 2026-04-27T21:00:00+00:00 --validation-end 2026-06-26T21:00:00+00:00
-python -m training.train --snapshot snapshots/<timestamp>/dataset_2019 --embedding-dim 64 --artifact-dir artifacts/the_pretty_model_2019_v1
+python -m data.dataset_builder --snapshot local/snapshots/<timestamp> --output-dirname dataset_2019 --train-end 2026-04-27T21:00:00+00:00 --validation-end 2026-06-26T21:00:00+00:00
+python -m training.train --snapshot local/snapshots/<timestamp>/dataset_2019 --embedding-dim 64 --artifact-dir artifacts/the_pretty_model_2019_v1
 ```
 
 Each training row is a positive pair: customer history **before** time T plus the model purchased at T. The first purchase per customer is kept in the raw snapshot for later cold-start use, but it is not a sequential training example. Missing target models and models without a usable visual vector are counted and excluded.
@@ -206,8 +206,8 @@ Train the compact two-tower recommender from a prepared dataset (no MySQL):
 
 ```bash
 python -m training.train --latest
-python -m training.train --snapshot snapshots/<timestamp> --compare 64,128
-python -m training.train --snapshot snapshots/<timestamp>/dataset --embedding-dim 128
+python -m training.train --snapshot local/snapshots/<timestamp> --compare 64,128
+python -m training.train --snapshot local/snapshots/<timestamp>/dataset --embedding-dim 128
 ```
 
 Default comparison is 64D vs 128D. 256D is optional (`--include-256`). The selected artifact is written to `artifacts/the_pretty_model_v1/`. Training dumps stay gitignored; the promoted v1 weights are committed so Adler can serve ranking once the CRM API exists.
@@ -222,12 +222,12 @@ Score current customers against cold-start new shoes with the frozen `the_pretty
 
 ```bash
 python -m inference.run --new-models path/to/load.csv --latest
-python -m inference.run --new-models path/to/load.csv --snapshot snapshots/<timestamp>
+python -m inference.run --new-models path/to/load.csv --snapshot local/snapshots/<timestamp>
 ```
 
 `--new-models` is a headerless CSV; column A is the model code. New catalog rows (visual + categoricals) are loaded through the DB API (`type=all` on `vw_reco_model_representation_v1`). Customer history comes from the latest snapshot. New model codes are not inserted into history.
 
-Writes gitignored files under `outputs/`:
+Writes gitignored files under `local/outputs/`:
 
 | File | Contents |
 | --- | --- |
@@ -239,4 +239,11 @@ Historical shoe→customer Recall@K is **not** computed here: it would re-encode
 
 ## Current scope
 
-Image embeddings and the HTTP embeddings service are in production. Two-tower V1, the DB API client, and ranking helpers are deployed so `pretty-crm-api` can call a ranking API once that contract is defined. Snapshots, ranking CSVs, and local caches stay gitignored. Weaviate, store UI, and automatic outreach remain out of scope.
+The ranking HTTP contract is `GET /recommend/customers/{model}`. The model returns `like_score` (0–1 taste affinity from an isotonic map of raw cosine). Recency does not change `like_score`. Customers who purchased in the last 60 days are dropped as a serving rule, then the rest are sorted by `like_score`. Default `limit` is 100 (max 200). Year filters live in CRM.
+
+```bash
+python -m inference.fit_like_calibrator --latest
+python -m inference.report_like_score --new-models path/to/load.csv --latest
+```
+
+This writes `local/outputs/like_score_report.md`. Snapshots, ranking dumps, and caches stay under gitignored `local/`. Weaviate, store UI, and automatic outreach remain out of scope.

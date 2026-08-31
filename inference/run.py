@@ -2,7 +2,7 @@
 
 Usage:
     python -m inference.run --new-models path/to/load.csv --latest
-    python -m inference.run --new-models path/to/load.csv --snapshot snapshots/<timestamp>
+    python -m inference.run --new-models path/to/load.csv --snapshot local/snapshots/<timestamp>
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from data.config import DEFAULT_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
+from data.config import DEFAULT_OUTPUT_ROOT, DEFAULT_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
 from data.dataset_builder import find_latest_snapshot, load_snapshot_frames
 from data.db_client import DbApiClient
 from training.artifact import load_artifact
@@ -66,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--artifact", type=Path, default=DEFAULT_ARTIFACT)
     parser.add_argument("--snapshot", type=Path, default=None)
     parser.add_argument("--latest", action="store_true")
-    parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "outputs")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--snapshot-root", type=Path, default=DEFAULT_SNAPSHOT_ROOT)
     return parser.parse_args(argv)
 

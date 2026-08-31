@@ -13,6 +13,11 @@
   "pytorch_version": "2.13.0+cpu",
   "device": "cpu",
   "loss": "in_batch_sampled_softmax",
+  "like_score": {
+    "calibrator": "like_calibrator.json",
+    "calibration_method": "isotonic_pav",
+    "note": "Refit from train split with python -m inference.fit_like_calibrator --latest"
+  },
   "lifecycle": {
     "new_or_updated_customer": "re-run Customer Tower only",
     "new_model": "run Model Tower only",

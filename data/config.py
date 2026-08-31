@@ -7,11 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+LOCAL_ROOT = REPO_ROOT / "local"
 DEFAULT_DB_API_URL = "https://db.adler-backend.com"
 DEFAULT_DB_NAME = "payments"
 DEFAULT_CONNECT_TIMEOUT = 10.0
 DEFAULT_READ_TIMEOUT = 180.0
-DEFAULT_SNAPSHOT_ROOT = REPO_ROOT / "snapshots"
+DEFAULT_SNAPSHOT_ROOT = LOCAL_ROOT / "snapshots"
+LEGACY_SNAPSHOT_ROOT = REPO_ROOT / "snapshots"
+DEFAULT_OUTPUT_ROOT = LOCAL_ROOT / "outputs"
 
 
 def load_dotenv(path: Path | None = None) -> None:

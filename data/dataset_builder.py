@@ -1,7 +1,7 @@
 """Build leakage-free sequential training examples from a snapshot.
 
 Usage:
-    python -m data.dataset_builder --snapshot snapshots/<timestamp>
+    python -m data.dataset_builder --snapshot local/snapshots/<timestamp>
     python -m data.dataset_builder --latest
 """
 
@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from data.config import DEFAULT_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
+from data.config import DEFAULT_SNAPSHOT_ROOT, LEGACY_SNAPSHOT_ROOT, REPO_ROOT, load_dotenv
 from data.schemas import (
     ANONYMOUS_CUSTOMER_ID,
     CUSTOMER_COLUMNS,
@@ -188,14 +188,23 @@ def load_snapshot_frames(snapshot_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame
 
 
 def find_latest_snapshot(snapshot_root: Path) -> Path:
-    if not snapshot_root.is_dir():
-        raise FileNotFoundError(f"snapshot root does not exist: {snapshot_root}")
-    candidates = [
-        path
-        for path in snapshot_root.iterdir()
-        if path.is_dir() and (path / SNAPSHOT_PURCHASES).is_file()
-    ]
+    candidates: list[Path] = []
+    if snapshot_root.is_dir():
+        candidates = [
+            path
+            for path in snapshot_root.iterdir()
+            if path.is_dir() and (path / SNAPSHOT_PURCHASES).is_file()
+        ]
+    looking_at_default = Path(snapshot_root).resolve() == DEFAULT_SNAPSHOT_ROOT.resolve()
+    if not candidates and looking_at_default and LEGACY_SNAPSHOT_ROOT.is_dir():
+        candidates = [
+            path
+            for path in LEGACY_SNAPSHOT_ROOT.iterdir()
+            if path.is_dir() and (path / SNAPSHOT_PURCHASES).is_file()
+        ]
     if not candidates:
+        if not snapshot_root.is_dir() and not looking_at_default:
+            raise FileNotFoundError(f"snapshot root does not exist: {snapshot_root}")
         raise FileNotFoundError(f"no snapshots found under {snapshot_root}")
     return max(candidates, key=lambda path: path.name)
 
