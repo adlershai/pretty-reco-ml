@@ -59,4 +59,4 @@ When `irrelevant`, the caller should skip catalog nearest-neighbor. The embeddin
 
 Python: decode bytes → SigLIP image vector → zero-shot text gate → return.
 
-Node: download WATI media → upload S3 → call this endpoint → catalog NN → write `wati_image_matches`.
+Node: download WATI media → upload S3 → `POST /match/image` for catalog identification. This query endpoint remains for callers that only need the vector + gate.

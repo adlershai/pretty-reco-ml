@@ -21,12 +21,16 @@ from fastapi.responses import JSONResponse
 from embeddings.contract import (
     EmbeddingsRequest,
     EmbeddingsResponse,
+    ImageMatchRequest,
+    ImageMatchResponse,
     QueryEmbeddingRequest,
     QueryEmbeddingResponse,
 )
 from embeddings.query_image import QueryImageError, decode_image_base64, run_query
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
+from embeddings.catalog_index import CatalogIndex, load_catalog_index
+from embeddings.match_image import DEFAULT_TOP, run_match
 from inference.recommender import (
     MODEL_VERSION,
     ModelNotEncodableError,
@@ -76,10 +80,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.encoder = VisionEncoder()
     logger.info("loading recommender")
     app.state.recommender = RecommenderService.load()
+    app.state.catalog = None
+    app.state.load_catalog = load_catalog_index
     yield
 
 
 app = FastAPI(title="pretty-reco-ml", lifespan=lifespan)
+
+
+def _catalog(request: Request) -> CatalogIndex:
+    catalog: CatalogIndex | None = getattr(request.app.state, "catalog", None)
+    if catalog is not None:
+        return catalog
+    loader = getattr(request.app.state, "load_catalog", None)
+    if loader is None:
+        raise HTTPException(status_code=503, detail="catalog is not loaded")
+    try:
+        catalog = loader()
+    except Exception:
+        logger.exception("catalog load failure")
+        raise HTTPException(status_code=503, detail="catalog is not loaded") from None
+    request.app.state.catalog = catalog
+    return catalog
 
 
 def _recommender(request: Request) -> RecommenderService:
@@ -172,4 +194,31 @@ def embeddings_query(
         raise
     except Exception:
         logger.exception("encoder/service-level failure")
+        raise HTTPException(status_code=500, detail="encoder/service-level failure") from None
+
+
+@app.post("/match/image", response_model=ImageMatchResponse)
+def match_image_endpoint(
+    payload: ImageMatchRequest,
+    request: Request,
+    _: None = Depends(require_api_key),
+) -> ImageMatchResponse:
+    encoder: VisionEncoder = request.app.state.encoder
+    catalog = _catalog(request)
+    top = int(payload.top) if payload.top is not None else DEFAULT_TOP
+    try:
+        image_bytes = decode_image_base64(payload.image_base64)
+        raw = run_match(image_bytes, encoder, catalog, top=top)
+        return ImageMatchResponse.model_validate(raw)
+    except QueryImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "INVALID_IMAGE") from None
+    except ValueError as exc:
+        if str(exc) == "INVALID_IMAGE":
+            raise HTTPException(status_code=400, detail="INVALID_IMAGE") from None
+        logger.exception("image match failure")
+        raise HTTPException(status_code=500, detail="encoder/service-level failure") from None
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("image match failure")
         raise HTTPException(status_code=500, detail="encoder/service-level failure") from None

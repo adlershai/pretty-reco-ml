@@ -105,8 +105,17 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | `GET /recommend/customers/{model}` | none | ranked customer IDs (`?limit=1–200`, default 100). Last purchase under 60 days is excluded, then sort by `like_score` (0–1 taste affinity). |
 | `POST /embeddings/models` | header `X-API-Key` | same JSON contract as the CLI worker |
 | `POST /embeddings/query` | header `X-API-Key` | one image (base64) → embedding + footwear/irrelevant gate |
+| `POST /match/image` | header `X-API-Key` | one image (base64) → shoe isolation + catalog model candidates (no query vector) |
 
 Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key.
+
+Catalog visual matching uses per-view 768-d SigLIP vectors (`main` / `pers` / `side` stay separate; model score is the best view). Tall screenshots are cropped to pale product panels before encoding. Audit/refresh stale CDN hashes:
+
+```bash
+python -m embeddings.catalog_integrity --audit --models 52160_001,52792_006
+python -m embeddings.catalog_integrity --refresh-stale --models 52160_001
+python -m evaluation.match_benchmark
+```
 
 ```bash
 curl http://127.0.0.1:8000/health

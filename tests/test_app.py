@@ -29,6 +29,11 @@ class DummyEncoder:
 
         return np.zeros(768, dtype=np.float32)
 
+    def encode_batch(self, images: list[Any]) -> Any:
+        import numpy as np
+
+        return np.zeros((len(images), 768), dtype=np.float32)
+
     def classify_relevance(self, _vector: Any) -> tuple[str, dict[str, float]]:
         return "footwear", {"footwear": 0.42, "irrelevant": 0.11}
 
@@ -204,3 +209,70 @@ def test_query_returns_embedding_and_relevance(
     assert body["scores"]["irrelevant"] == 0.4
     assert seen["bytes"] == b"hello"
     assert isinstance(seen["encoder"], DummyEncoder)
+
+
+def test_match_image_rejects_missing_key(client: TestClient) -> None:
+    response = client.post("/match/image", json={"image_base64": "a" * 16})
+    assert response.status_code == 401
+
+
+def test_match_image_returns_candidates_without_embedding(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.app.state.catalog = object()
+
+    def fake_run_match(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "match": {
+                "model": "52792_006",
+                "score": 0.91,
+                "best_image_type": "side",
+                "model_id": 9,
+            },
+            "candidates": [
+                {
+                    "model": "52792_006",
+                    "score": 0.91,
+                    "best_image_type": "side",
+                    "model_id": 9,
+                }
+            ],
+            "preprocessing": {
+                "shoe_isolated": True,
+                "crop": [0, 90, 200, 280],
+                "reason": "studio_panel",
+                "image_size": [200, 500],
+            },
+            "relevance": "footwear",
+            "scores": {"footwear": 0.4, "irrelevant": 0.1},
+            "embedding_model": "google/siglip-base-patch16-224",
+        }
+
+    monkeypatch.setattr(app_module, "run_match", fake_run_match)
+    response = client.post(
+        "/match/image",
+        json={"image_base64": "aGVsbG8=", "top": 10},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "embedding" not in body
+    assert body["match"]["model"] == "52792_006"
+    assert body["preprocessing"]["shoe_isolated"] is True
+    assert body["candidates"][0]["best_image_type"] == "side"
+
+
+def test_match_image_unavailable_catalog_is_503(client: TestClient) -> None:
+    client.app.state.catalog = None
+
+    def boom() -> None:
+        raise RuntimeError("db down")
+
+    client.app.state.load_catalog = boom
+    response = client.post(
+        "/match/image",
+        json={"image_base64": "aGVsbG8="},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "catalog is not loaded"}

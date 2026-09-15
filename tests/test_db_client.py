@@ -173,3 +173,32 @@ def test_all_empty_sql_raises() -> None:
     with pytest.raises(DbApiError, match="sql is required"):
         client.all("  ")
     assert session.calls == []
+
+
+def test_insert_posts_upsert_payload() -> None:
+    client, session = make_client([FakeResponse(200, {"ok": True})])
+    client.insert(
+        "reco_model_image_embeddings",
+        ["model_id", "image_hash"],
+        [9, "abc"],
+        on_duplicate_update=["image_hash"],
+    )
+    assert session.calls[0]["json"] == {
+        "type": "insert",
+        "table_name": "reco_model_image_embeddings",
+        "fields": ["model_id", "image_hash"],
+        "values": [9, "abc"],
+        "options": {"on_duplicate_update": ["image_hash"]},
+    }
+
+
+def test_update_posts_row_id_payload() -> None:
+    client, session = make_client([FakeResponse(200, {"ok": True})])
+    client.update("reco_model_image_embeddings", 7022, ["image_hash"], ["abc"])
+    assert session.calls[0]["json"] == {
+        "type": "update",
+        "table_name": "reco_model_image_embeddings",
+        "row_id": 7022,
+        "fields": ["image_hash"],
+        "values": ["abc"],
+    }

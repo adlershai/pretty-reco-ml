@@ -85,6 +85,52 @@ class DbApiClient:
         rows = normalize_view_payload(body)
         return [_normalize_record(row, "all") for row in rows]
 
+    def insert(
+        self,
+        table: str,
+        fields: list[str],
+        values: list[Any],
+        *,
+        on_duplicate_update: list[str] | None = None,
+    ) -> Any:
+        """Insert one row via type=insert."""
+        name = str(table or "").strip()
+        if not name:
+            raise DbApiError("table is required")
+        if not fields:
+            raise DbApiError("fields are required")
+        options: dict[str, Any] = {}
+        if on_duplicate_update:
+            options["on_duplicate_update"] = list(on_duplicate_update)
+        payload: dict[str, Any] = {
+            "type": "insert",
+            "table_name": name,
+            "fields": list(fields),
+            "values": list(values),
+        }
+        if options:
+            payload["options"] = options
+        return self._post(payload)
+
+    def update(self, table: str, row_id: int, fields: list[str], values: list[Any]) -> Any:
+        """Update one row by primary key via type=update."""
+        name = str(table or "").strip()
+        if not name:
+            raise DbApiError("table is required")
+        if int(row_id) <= 0:
+            raise DbApiError("row_id must be >= 1")
+        if not fields:
+            raise DbApiError("fields are required")
+        return self._post(
+            {
+                "type": "update",
+                "table_name": name,
+                "row_id": int(row_id),
+                "fields": list(fields),
+                "values": list(values),
+            }
+        )
+
     def _headers(self) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",

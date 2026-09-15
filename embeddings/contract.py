@@ -65,3 +65,31 @@ class QueryEmbeddingResponse(BaseModel):
     embedding_dimension: int
     relevance: Literal["footwear", "irrelevant"]
     scores: dict[str, float]
+
+
+class ImageMatchRequest(BaseModel):
+    image_base64: str = Field(min_length=8)
+    top: int | None = Field(default=None, ge=1, le=50)
+
+
+class ImageMatchCandidate(BaseModel):
+    model: str
+    score: float
+    best_image_type: str
+    model_id: int | None = None
+
+
+class ImageMatchPreprocessing(BaseModel):
+    shoe_isolated: bool
+    crop: list[int]
+    reason: str
+    image_size: list[int]
+
+
+class ImageMatchResponse(BaseModel):
+    match: ImageMatchCandidate | None = None
+    candidates: list[ImageMatchCandidate]
+    preprocessing: ImageMatchPreprocessing
+    relevance: Literal["footwear", "irrelevant"]
+    scores: dict[str, float]
+    embedding_model: str
