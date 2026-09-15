@@ -13,7 +13,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from transformers import AutoModel, SiglipImageProcessorPil
+from transformers import AutoModel, AutoTokenizer, SiglipImageProcessorPil
+
+from embeddings.relevance import (
+    FOOTWEAR_PROMPTS,
+    JUNK_PROMPTS,
+    classify_relevance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +47,7 @@ class VisionEncoder:
         logger.info("vision device: %s", self.device.type)
 
         self._processor = SiglipImageProcessorPil.from_pretrained(model_id)
+        self._tokenizer = AutoTokenizer.from_pretrained(model_id)
         self._model = AutoModel.from_pretrained(model_id)
         self._model.to(self.device)
         self._model.eval()
@@ -53,6 +60,9 @@ class VisionEncoder:
             self.embedding_dimension = int(hidden.hidden_size)
         else:
             self.embedding_dimension = EMBEDDING_DIMENSION
+
+        self._footwear_text = self.encode_text(FOOTWEAR_PROMPTS)
+        self._junk_text = self.encode_text(JUNK_PROMPTS)
 
     @property
     def embedding_model(self) -> str:
@@ -77,3 +87,34 @@ class VisionEncoder:
             features = F.normalize(features, p=2, dim=-1)
 
         return features.detach().cpu().numpy().astype(np.float32, copy=False)
+
+    def encode_text(self, texts: Sequence[str]) -> np.ndarray:
+        """Encode prompts to an (N, D) float32 array of L2-normalized vectors."""
+        if not texts:
+            return np.empty((0, self.embedding_dimension), dtype=np.float32)
+
+        encoded = self._tokenizer(
+            list(texts),
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        input_ids = encoded["input_ids"].to(self.device)
+        attention_mask = encoded["attention_mask"].to(self.device) if "attention_mask" in encoded else None
+
+        with torch.inference_mode():
+            if attention_mask is not None:
+                outputs = self._model.get_text_features(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                )
+            else:
+                outputs = self._model.get_text_features(input_ids=input_ids)
+            features = getattr(outputs, "pooler_output", outputs)
+            features = F.normalize(features, p=2, dim=-1)
+
+        return features.detach().cpu().numpy().astype(np.float32, copy=False)
+
+    def classify_relevance(self, image_vector: np.ndarray) -> tuple[str, dict[str, float]]:
+        """Zero-shot footwear vs junk on the same image vector used for catalog NN."""
+        return classify_relevance(image_vector, self._footwear_text, self._junk_text)

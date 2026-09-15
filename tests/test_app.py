@@ -24,6 +24,14 @@ class DummyEncoder:
     embedding_model = "dummy"
     embedding_dimension = 768
 
+    def encode(self, _image: Any) -> Any:
+        import numpy as np
+
+        return np.zeros(768, dtype=np.float32)
+
+    def classify_relevance(self, _vector: Any) -> tuple[str, dict[str, float]]:
+        return "footwear", {"footwear": 0.42, "irrelevant": 0.11}
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -147,3 +155,52 @@ def test_embeddings_encoder_failure_is_500(client: TestClient, monkeypatch: pyte
     )
     assert response.status_code == 500
     assert response.json() == {"detail": "encoder/service-level failure"}
+
+
+def test_query_rejects_missing_key(client: TestClient) -> None:
+    response = client.post("/embeddings/query", json={"image_base64": "a" * 16})
+    assert response.status_code == 401
+
+
+def test_query_rejects_bad_payload(client: TestClient) -> None:
+    response = client.post(
+        "/embeddings/query",
+        json={"image": "nope"},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "invalid request/payload"}
+
+
+def test_query_returns_embedding_and_relevance(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import numpy as np
+
+    seen: dict[str, Any] = {}
+
+    def fake_run_query(image_bytes: bytes, encoder: Any) -> dict[str, Any]:
+        seen["bytes"] = image_bytes
+        seen["encoder"] = encoder
+        return {
+            "embedding": np.zeros(3, dtype=float).tolist(),
+            "embedding_model": "google/siglip-base-patch16-224",
+            "embedding_dimension": 3,
+            "relevance": "irrelevant",
+            "scores": {"footwear": 0.1, "irrelevant": 0.4},
+        }
+
+    monkeypatch.setattr(app_module, "run_query", fake_run_query)
+    response = client.post(
+        "/embeddings/query",
+        json={"image_base64": "aGVsbG8="},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["relevance"] == "irrelevant"
+    assert body["embedding_model"] == "google/siglip-base-patch16-224"
+    assert body["embedding_dimension"] == 3
+    assert body["scores"]["irrelevant"] == 0.4
+    assert seen["bytes"] == b"hello"
+    assert isinstance(seen["encoder"], DummyEncoder)

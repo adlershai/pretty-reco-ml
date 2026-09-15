@@ -104,6 +104,7 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | `GET /health` | none | service status, model version, vector dimension |
 | `GET /recommend/customers/{model}` | none | ranked customer IDs (`?limit=1–200`, default 100). Last purchase under 60 days is excluded, then sort by `like_score` (0–1 taste affinity). |
 | `POST /embeddings/models` | header `X-API-Key` | same JSON contract as the CLI worker |
+| `POST /embeddings/query` | header `X-API-Key` | one image (base64) → embedding + footwear/irrelevant gate |
 
 Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key.
 

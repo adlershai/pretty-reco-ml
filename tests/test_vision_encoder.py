@@ -90,3 +90,11 @@ def test_worker_encodes_available_views(encoder: VisionEncoder) -> None:
         assert len(item["embedding"]) == EMBEDDING_DIMENSION
         assert all(isinstance(value, float) for value in item["embedding"])
         assert len(item["image_hash"]) == 64
+
+
+def test_packshot_classifies_as_footwear(encoder: VisionEncoder, main_image_bytes: bytes) -> None:
+    image = decode_image(main_image_bytes)
+    vector = encoder.encode(image)
+    relevance, scores = encoder.classify_relevance(vector)
+    assert relevance == "footwear"
+    assert scores["footwear"] >= scores["irrelevant"]

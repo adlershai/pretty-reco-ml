@@ -6,7 +6,7 @@ and per-image errors. This module does not access any database.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,3 +53,15 @@ class EmbeddingError(BaseModel):
 class EmbeddingsResponse(BaseModel):
     results: list[EmbeddingResult]
     errors: list[EmbeddingError]
+
+
+class QueryEmbeddingRequest(BaseModel):
+    image_base64: str = Field(min_length=8)
+
+
+class QueryEmbeddingResponse(BaseModel):
+    embedding: list[float]
+    embedding_model: str
+    embedding_dimension: int
+    relevance: Literal["footwear", "irrelevant"]
+    scores: dict[str, float]

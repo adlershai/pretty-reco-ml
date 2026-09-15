@@ -18,7 +18,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from embeddings.contract import EmbeddingsRequest, EmbeddingsResponse
+from embeddings.contract import (
+    EmbeddingsRequest,
+    EmbeddingsResponse,
+    QueryEmbeddingRequest,
+    QueryEmbeddingResponse,
+)
+from embeddings.query_image import QueryImageError, decode_image_base64, run_query
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
 from inference.recommender import (
@@ -137,6 +143,31 @@ def embeddings_models(
     try:
         raw = run(payload.model_dump(exclude_none=True), encoder, batch_size)
         return EmbeddingsResponse.model_validate(raw)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("encoder/service-level failure")
+        raise HTTPException(status_code=500, detail="encoder/service-level failure") from None
+
+
+@app.post("/embeddings/query", response_model=QueryEmbeddingResponse)
+def embeddings_query(
+    payload: QueryEmbeddingRequest,
+    request: Request,
+    _: None = Depends(require_api_key),
+) -> QueryEmbeddingResponse:
+    encoder: VisionEncoder = request.app.state.encoder
+    try:
+        image_bytes = decode_image_base64(payload.image_base64)
+        raw = run_query(image_bytes, encoder)
+        return QueryEmbeddingResponse.model_validate(raw)
+    except QueryImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "INVALID_IMAGE") from None
+    except ValueError as exc:
+        if str(exc) == "INVALID_IMAGE":
+            raise HTTPException(status_code=400, detail="INVALID_IMAGE") from None
+        logger.exception("query image failure")
+        raise HTTPException(status_code=500, detail="encoder/service-level failure") from None
     except HTTPException:
         raise
     except Exception:
