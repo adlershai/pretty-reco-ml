@@ -66,10 +66,14 @@ def test_match_image_picks_isolated_panel() -> None:
     assert result.match.model == "52792_006"
     assert result.match.best_image_type == "side"
     assert result.shoe_isolated is True
-    payload = match_result_to_dict(result, image_size=image.size)
+    payload = match_result_to_dict(result, image_size=image.size, image=image, catalog=catalog)
+    assert payload["status"] == "needs_verification"
+    assert payload["match"] is None
     assert "embedding" not in payload
     assert payload["preprocessing"]["crop"][1] >= 80
     assert payload["candidates"][0]["model"] == "52792_006"
+    assert payload["verifier"]["verify_top"] == 10
+    assert payload["preprocessing"]["crop_jpeg_base64"]
 
 
 def test_packshot_keeps_full_frame_when_it_is_the_best_crop() -> None:

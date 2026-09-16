@@ -1,9 +1,10 @@
 # API Contract — Visual Image Match
 
-## Endpoint
+## Endpoints
 
 ```http
 POST /match/image
+POST /match/image/decide
 ```
 
 Header:
@@ -13,64 +14,85 @@ Content-Type: application/json
 X-API-Key: <RECO_API_KEY>
 ```
 
-Production URL: `https://ai.adler-backend.com/match/image`.
+Production URL: `https://ai.adler-backend.com`. Callers send **image bytes** (base64). Python does not call OpenAI and does not fetch WATI or S3 URLs. The 768-d query vector is not returned.
 
-Callers send **image bytes** (base64). Python does not fetch WATI or S3 URLs. The 768-d query vector is not returned.
+pretty-crm-api owns `OPENAI_API_KEY` and `lib/openai.createResponse`. ML owns isolation, SigLIP retrieval, the verifier prompt/schema, and MATCH vs UNCERTAIN.
 
-## Request
+## Request (`POST /match/image`)
 
 ```json
 {
   "image_base64": "<base64 or data:image/jpeg;base64,...>",
-  "top": 10
+  "top": 10,
+  "verify_top": 10
 }
 ```
 
-`top` is optional (default 10, max 50): number of catalog models to return.
+`top` is SigLIP retrieval size (default 10, max 50). `verify_top` is how many of those candidates CRM should send to the vision verifier (default 10, or env `MATCH_VERIFY_TOP`). Retrieval is raised to at least `verify_top`.
 
-## Successful Response
+## Retrieval response
+
+Footwear:
 
 ```json
 {
-  "match": {
-    "model": "52792_006",
-    "score": 0.91,
-    "best_image_type": "side",
-    "model_id": 2937
-  },
-  "candidates": [
-    {
-      "model": "52792_006",
-      "score": 0.91,
-      "best_image_type": "side",
-      "model_id": 2937
-    }
-  ],
+  "status": "needs_verification",
+  "match": null,
+  "candidates": [{"model": "52792_006", "score": 0.85, "best_image_type": "side", "model_id": 2937}],
   "preprocessing": {
     "shoe_isolated": true,
     "crop": [8, 373, 937, 1325],
     "reason": "studio_panel",
-    "image_size": [945, 2048]
+    "image_size": [945, 2048],
+    "crop_jpeg_base64": "<isolated crop jpeg>"
+  },
+  "verifier": {
+    "requestType": "watiImageIdentity",
+    "verify_top": 10,
+    "jsonSchema": {},
+    "prompt": [],
+    "images": [{"slot": "customer", "kind": "crop"}]
   },
   "relevance": "footwear",
-  "scores": {
-    "footwear": 0.31,
-    "irrelevant": 0.08
-  },
+  "scores": {"footwear": 0.31, "irrelevant": 0.08},
   "embedding_model": "google/siglip-base-patch16-224"
 }
 ```
 
-`crop` is `[left, top, right, bottom]` in pixel coordinates on the original image.
+`match` is null until `/match/image/decide`. SigLIP cosine on `candidates` is retrieval similarity, not identity confidence.
 
-Matching uses `google/siglip-base-patch16-224` (768-d, L2-normalized). Each catalog view (`main`, `pers`, `side`) is an independent candidate. Model score is `MAX(view similarity)`. The 64-d recommendation Model Tower is not used.
+When `relevance` is `irrelevant`, `status` is `irrelevant`, `verifier` is null, and `candidates` is empty.
 
-When `relevance` is `irrelevant`, `match` is `null` and `candidates` is empty. The crop diagnostics are still returned.
+## Decide (`POST /match/image/decide`)
+
+CRM fills `verifier.images` (customer crop + packshots), calls OpenAI, then posts the raw output:
+
+```json
+{
+  "candidates": [{"model": "51604_A", "score": 0.78, "best_image_type": "pers", "model_id": 1}],
+  "openai_output": {"candidates": []}
+}
+```
+
+```json
+{
+  "status": "match",
+  "match": {"model": "51604_A", "score": 0.78, "best_image_type": "pers", "model_id": 1},
+  "confidence": 0.94,
+  "reason": "unique_same_model",
+  "verification": [],
+  "candidates": []
+}
+```
+
+Or `"status": "uncertain"` with `"match": null`. Confidence is diagnostic, not a calibrated probability.
+
+Acceptance: exactly one verifier `same` without an exclusionary shape/pattern contradiction. Two sames, zero sames, or a failed OpenAI payload → `uncertain`.
 
 ## HTTP Status
 
 ```text
-200 - ranked
+200 - ranked or decided
 400 - invalid request/payload or INVALID_IMAGE
 401 - missing or invalid API key
 503 - catalog is not loaded
@@ -79,17 +101,8 @@ When `relevance` is `irrelevant`, `match` is `null` and `candidates` is empty. T
 
 ## Responsibility Boundary
 
-Python: decode bytes → isolate shoe region → SigLIP → per-view catalog search → candidates + scores + crop diagnostics.
+Python: isolate → SigLIP Top-N → verifier prompt/schema → MATCH/UNCERTAIN policy.
 
-Node: download WATI media → upload S3 → call this endpoint → apply business threshold → write `wati_image_matches`.
+Node: WATI download → S3 → `/match/image` → OpenAI Responses (`watiImageIdentity`) → `/match/image/decide` → persist `matched` / `uncertain` / `irrelevant`.
 
-## Stage 3 reranker
-
-Not implemented. A 3-case eval (`python -m evaluation.match_benchmark`) compared full-frame SigLIP to isolated-shoe SigLIP:
-
-| split | Recall@1 | Recall@3 | Recall@5 | Recall@10 |
-| --- | ---: | ---: | ---: | ---: |
-| original | 0.67 | 0.67 | 1.00 | 1.00 |
-| isolated | 1.00 | 1.00 | 1.00 | 1.00 |
-
-`845.jpg` (WATI screenshot) went from rank 4 (`52160_001`) to rank 1 (`52792_006`) after automatic studio-panel crop `[8, 373, 937, 1325]`. Packshot self-matches stayed rank 1 with the full frame. A fine-grained identity reranker is not justified until a larger labeled set shows residual errors.
+Do not use SigLIP cosine as a business identity cutoff. Two-tower `like_score` is unchanged.

@@ -21,6 +21,8 @@ from fastapi.responses import JSONResponse
 from embeddings.contract import (
     EmbeddingsRequest,
     EmbeddingsResponse,
+    ImageMatchDecideRequest,
+    ImageMatchDecideResponse,
     ImageMatchRequest,
     ImageMatchResponse,
     QueryEmbeddingRequest,
@@ -30,7 +32,7 @@ from embeddings.query_image import QueryImageError, decode_image_base64, run_que
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
 from embeddings.catalog_index import CatalogIndex, load_catalog_index
-from embeddings.match_image import DEFAULT_TOP, run_match
+from embeddings.match_image import DEFAULT_TOP, decide_match, run_match
 from inference.recommender import (
     MODEL_VERSION,
     ModelNotEncodableError,
@@ -208,7 +210,13 @@ def match_image_endpoint(
     top = int(payload.top) if payload.top is not None else DEFAULT_TOP
     try:
         image_bytes = decode_image_base64(payload.image_base64)
-        raw = run_match(image_bytes, encoder, catalog, top=top)
+        raw = run_match(
+            image_bytes,
+            encoder,
+            catalog,
+            top=top,
+            verify_top=payload.verify_top,
+        )
         return ImageMatchResponse.model_validate(raw)
     except QueryImageError as exc:
         raise HTTPException(status_code=400, detail=str(exc) or "INVALID_IMAGE") from None
@@ -221,4 +229,20 @@ def match_image_endpoint(
         raise
     except Exception:
         logger.exception("image match failure")
+        raise HTTPException(status_code=500, detail="encoder/service-level failure") from None
+
+
+@app.post("/match/image/decide", response_model=ImageMatchDecideResponse)
+def match_image_decide(
+    payload: ImageMatchDecideRequest,
+    _: None = Depends(require_api_key),
+) -> ImageMatchDecideResponse:
+    try:
+        candidates = [item.model_dump() for item in payload.candidates]
+        raw = decide_match(payload.openai_output, candidates)
+        return ImageMatchDecideResponse.model_validate(raw)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("image match decide failure")
         raise HTTPException(status_code=500, detail="encoder/service-level failure") from None

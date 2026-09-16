@@ -223,12 +223,8 @@ def test_match_image_returns_candidates_without_embedding(
 
     def fake_run_match(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {
-            "match": {
-                "model": "52792_006",
-                "score": 0.91,
-                "best_image_type": "side",
-                "model_id": 9,
-            },
+            "status": "needs_verification",
+            "match": None,
             "candidates": [
                 {
                     "model": "52792_006",
@@ -243,6 +239,7 @@ def test_match_image_returns_candidates_without_embedding(
                 "reason": "studio_panel",
                 "image_size": [200, 500],
             },
+            "verifier": {"requestType": "watiImageIdentity", "verify_top": 10},
             "relevance": "footwear",
             "scores": {"footwear": 0.4, "irrelevant": 0.1},
             "embedding_model": "google/siglip-base-patch16-224",
@@ -257,7 +254,8 @@ def test_match_image_returns_candidates_without_embedding(
     assert response.status_code == 200
     body = response.json()
     assert "embedding" not in body
-    assert body["match"]["model"] == "52792_006"
+    assert body["status"] == "needs_verification"
+    assert body["match"] is None
     assert body["preprocessing"]["shoe_isolated"] is True
     assert body["candidates"][0]["best_image_type"] == "side"
 
@@ -276,3 +274,52 @@ def test_match_image_unavailable_catalog_is_503(client: TestClient) -> None:
     )
     assert response.status_code == 503
     assert response.json() == {"detail": "catalog is not loaded"}
+
+
+def test_match_image_decide_unique_same_is_match(client: TestClient) -> None:
+    response = client.post(
+        "/match/image/decide",
+        json={
+            "candidates": [
+                {"model": "51604_A", "score": 0.78, "best_image_type": "pers", "model_id": 1},
+                {"model": "50583_C", "score": 0.79, "best_image_type": "pers", "model_id": 2},
+            ],
+            "openai_output": {
+                "candidates": [
+                    {
+                        "model": "51604_A",
+                        "verdict": "same",
+                        "shape": 0.96,
+                        "pattern": 0.95,
+                        "material": 0.9,
+                        "details": 0.94,
+                        "color_placement": 0.8,
+                        "contradictions": [],
+                        "reason": "same last",
+                    },
+                    {
+                        "model": "50583_C",
+                        "verdict": "different",
+                        "shape": 0.4,
+                        "pattern": 0.2,
+                        "material": 0.5,
+                        "details": 0.4,
+                        "color_placement": 0.8,
+                        "contradictions": ["round vs pointed"],
+                        "reason": "toe",
+                    },
+                ]
+            },
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "match"
+    assert body["match"]["model"] == "51604_A"
+    assert body["match"]["score"] == 0.78
+
+
+def test_match_image_decide_rejects_missing_key(client: TestClient) -> None:
+    response = client.post("/match/image/decide", json={"candidates": [], "openai_output": {}})
+    assert response.status_code == 401

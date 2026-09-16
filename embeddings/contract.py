@@ -70,12 +70,13 @@ class QueryEmbeddingResponse(BaseModel):
 class ImageMatchRequest(BaseModel):
     image_base64: str = Field(min_length=8)
     top: int | None = Field(default=None, ge=1, le=50)
+    verify_top: int | None = Field(default=None, ge=1, le=50)
 
 
 class ImageMatchCandidate(BaseModel):
     model: str
-    score: float
-    best_image_type: str
+    score: float | None = None
+    best_image_type: str | None = None
     model_id: int | None = None
 
 
@@ -84,12 +85,30 @@ class ImageMatchPreprocessing(BaseModel):
     crop: list[int]
     reason: str
     image_size: list[int]
+    crop_jpeg_base64: str | None = None
 
 
 class ImageMatchResponse(BaseModel):
+    status: Literal["needs_verification", "irrelevant", "match", "uncertain"]
     match: ImageMatchCandidate | None = None
     candidates: list[ImageMatchCandidate]
     preprocessing: ImageMatchPreprocessing
+    verifier: dict[str, Any] | None = None
     relevance: Literal["footwear", "irrelevant"]
     scores: dict[str, float]
     embedding_model: str
+
+
+class ImageMatchDecideRequest(BaseModel):
+    candidates: list[ImageMatchCandidate]
+    openai_output: Any
+    verify_top: int | None = Field(default=None, ge=1, le=50)
+
+
+class ImageMatchDecideResponse(BaseModel):
+    status: Literal["match", "uncertain"]
+    match: ImageMatchCandidate | None = None
+    confidence: float | None = None
+    reason: str
+    verification: list[dict[str, Any]]
+    candidates: list[ImageMatchCandidate]

@@ -11,6 +11,12 @@ from PIL import Image
 from embeddings.catalog_index import CatalogIndex
 from embeddings.isolate import CropBox, crop_image, isolation_applied, propose_crops
 from embeddings.relevance import RELEVANCE_FOOTWEAR
+from embeddings.verifier import (
+    build_verifier_request,
+    crop_jpeg_base64,
+    decide_identity,
+    verify_top_value,
+)
 from embeddings.vision_encoder import VisionEncoder
 from evaluation.image_match import ModelHit
 
@@ -107,20 +113,70 @@ def match_image(
     )
 
 
-def match_result_to_dict(result: ImageMatchResult, *, image_size: tuple[int, int]) -> dict[str, Any]:
+def match_result_to_dict(
+    result: ImageMatchResult,
+    *,
+    image_size: tuple[int, int],
+    image: Image.Image | None = None,
+    catalog: CatalogIndex | None = None,
+    verify_top: int | None = None,
+) -> dict[str, Any]:
     width, height = image_size
+    candidates = [_model_payload(hit) for hit in result.candidates]
+    footwear = result.relevance == RELEVANCE_FOOTWEAR and bool(candidates)
+    preprocessing = {
+        "shoe_isolated": result.shoe_isolated,
+        "crop": result.crop.as_list(),
+        "reason": result.crop.reason,
+        "image_size": [int(width), int(height)],
+        "crop_jpeg_base64": None,
+    }
+    if image is not None:
+        preprocessing["crop_jpeg_base64"] = crop_jpeg_base64(image, result.crop)
+    verifier = None
+    if footwear:
+        verifier = build_verifier_request(
+            candidates,
+            catalog_rows=list(catalog.rows) if catalog is not None else [],
+            verify_top=verify_top,
+        )
     return {
-        "match": None if result.match is None else _model_payload(result.match),
-        "candidates": [_model_payload(hit) for hit in result.candidates],
-        "preprocessing": {
-            "shoe_isolated": result.shoe_isolated,
-            "crop": result.crop.as_list(),
-            "reason": result.crop.reason,
-            "image_size": [int(width), int(height)],
-        },
+        "status": "needs_verification" if footwear else "irrelevant",
+        "match": None,
+        "candidates": candidates,
+        "preprocessing": preprocessing,
+        "verifier": verifier,
         "relevance": result.relevance,
         "scores": result.scores,
         "embedding_model": result.embedding_model,
+    }
+
+
+def decide_match(
+    openai_output: Any,
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    decision = decide_identity(openai_output, candidates)
+    chosen = None
+    if decision.status == "match" and decision.model:
+        for hit in candidates:
+            if str(hit.get("model") or "") == decision.model:
+                chosen = hit
+                break
+        if chosen is None:
+            chosen = {
+                "model": decision.model,
+                "score": None,
+                "best_image_type": None,
+                "model_id": None,
+            }
+    return {
+        "status": decision.status,
+        "match": chosen if decision.status == "match" else None,
+        "confidence": decision.confidence,
+        "reason": decision.reason,
+        "verification": decision.verification,
+        "candidates": candidates,
     }
 
 
@@ -130,9 +186,17 @@ def run_match(
     catalog: CatalogIndex,
     *,
     top: int = DEFAULT_TOP,
+    verify_top: int | None = None,
 ) -> dict[str, Any]:
     from embeddings.worker import decode_image
 
+    retrieve_top = max(int(top), verify_top_value(verify_top))
     image = decode_image(image_bytes)
-    result = match_image(image, encoder, catalog, top=top)
-    return match_result_to_dict(result, image_size=image.size)
+    result = match_image(image, encoder, catalog, top=retrieve_top)
+    return match_result_to_dict(
+        result,
+        image_size=image.size,
+        image=image,
+        catalog=catalog,
+        verify_top=verify_top,
+    )
