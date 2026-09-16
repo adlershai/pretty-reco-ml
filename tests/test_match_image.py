@@ -119,3 +119,54 @@ def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
     assert result.match is None
     assert result.candidates == []
     assert result.relevance == "irrelevant"
+    assert result.image_kind == "garbage"
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "garbage"
+    assert payload["image_kind"] == "garbage"
+    assert payload["candidates"] == []
+
+
+def test_match_image_routes_order_without_catalog_search() -> None:
+    class OrderEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.05, "irrelevant": 0.4}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "order", {"footwear": 0.05, "irrelevant": 0.2, "order": 0.5, "garbage": 0.2}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="51604_004",
+                image_type="main",
+                embedding=_unit([0.0, 1.0, 0.0]),
+                model_id=4,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(
+        image,
+        OrderEncoder(),
+        catalog,
+        top=10,
+        extract_order_fn=lambda _img: {
+            "order_number": "87610",
+            "model": "53698_003",
+            "size": "38.5",
+        },
+    )
+    assert result.match is None
+    assert result.candidates == []
+    assert result.image_kind == "order"
+    assert result.order == {
+        "order_number": "87610",
+        "model": "53698_003",
+        "size": "38.5",
+    }
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "order"
+    assert payload["verifier"] is None
+    assert payload["order"]["order_number"] == "87610"

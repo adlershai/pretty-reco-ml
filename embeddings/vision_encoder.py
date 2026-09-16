@@ -17,8 +17,11 @@ from transformers import AutoModel, AutoTokenizer, SiglipImageProcessorPil
 
 from embeddings.relevance import (
     FOOTWEAR_PROMPTS,
+    GARBAGE_PROMPTS,
     JUNK_PROMPTS,
+    ORDER_PROMPTS,
     classify_relevance,
+    classify_scene,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,8 @@ class VisionEncoder:
 
         self._footwear_text = self.encode_text(FOOTWEAR_PROMPTS)
         self._junk_text = self.encode_text(JUNK_PROMPTS)
+        self._order_text = self.encode_text(ORDER_PROMPTS)
+        self._garbage_text = self.encode_text(GARBAGE_PROMPTS)
 
     @property
     def embedding_model(self) -> str:
@@ -118,3 +123,12 @@ class VisionEncoder:
     def classify_relevance(self, image_vector: np.ndarray) -> tuple[str, dict[str, float]]:
         """Zero-shot footwear vs junk on the same image vector used for catalog NN."""
         return classify_relevance(image_vector, self._footwear_text, self._junk_text)
+
+    def classify_scene(self, image_vector: np.ndarray) -> tuple[str, dict[str, float]]:
+        """Full-frame shoe vs order screenshot vs garbage (issue #4)."""
+        return classify_scene(
+            image_vector,
+            self._footwear_text,
+            self._garbage_text,
+            self._order_text,
+        )

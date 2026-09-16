@@ -80,6 +80,12 @@ class ImageMatchCandidate(BaseModel):
     model_id: int | None = None
 
 
+class OrderExtract(BaseModel):
+    order_number: str | None = None
+    model: str | None = None
+    size: str | None = None
+
+
 class ImageMatchPreprocessing(BaseModel):
     shoe_isolated: bool
     crop: list[int]
@@ -89,7 +95,7 @@ class ImageMatchPreprocessing(BaseModel):
 
 
 class ImageMatchResponse(BaseModel):
-    status: Literal["needs_verification", "irrelevant", "match", "uncertain"]
+    status: Literal["needs_verification", "irrelevant", "match", "uncertain", "order", "garbage"]
     match: ImageMatchCandidate | None = None
     candidates: list[ImageMatchCandidate]
     preprocessing: ImageMatchPreprocessing
@@ -97,6 +103,8 @@ class ImageMatchResponse(BaseModel):
     relevance: Literal["footwear", "irrelevant"]
     scores: dict[str, float]
     embedding_model: str
+    image_kind: Literal["shoe", "order", "garbage"] = "shoe"
+    order: OrderExtract | None = None
 
 
 class ImageMatchDecideRequest(BaseModel):

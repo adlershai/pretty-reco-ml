@@ -61,7 +61,34 @@ Footwear:
 
 `match` is null until `/match/image/decide`. SigLIP cosine on `candidates` is retrieval similarity, not identity confidence.
 
-When `relevance` is `irrelevant`, `status` is `irrelevant`, `verifier` is null, and `candidates` is empty.
+When `relevance` is `irrelevant`, `status` is `garbage` or `order`, `verifier` is null, and `candidates` is empty. `image_kind` is `shoe` | `order` | `garbage`.
+
+Non-shoe (issue #4): the full frame is classified first. Order screenshots skip catalog search even if a tiny product thumbnail looks like a shoe. Garbage (clothing ads, gowns, unrelated photos) also skips SKU matching.
+
+Order:
+
+```json
+{
+  "status": "order",
+  "match": null,
+  "candidates": [],
+  "preprocessing": {
+    "shoe_isolated": false,
+    "crop": [0, 0, 1080, 1920],
+    "reason": "full",
+    "image_size": [1080, 1920],
+    "crop_jpeg_base64": null
+  },
+  "verifier": null,
+  "relevance": "irrelevant",
+  "scores": {"footwear": 0.08, "irrelevant": 0.12, "order": 0.31, "garbage": 0.12},
+  "embedding_model": "google/siglip-base-patch16-224",
+  "image_kind": "order",
+  "order": {"order_number": "87610", "model": "53698_003", "size": "38.5"}
+}
+```
+
+Permanent fixtures: WATI **736** clothing ad → `garbage`; WATI **753** (`tests/fixtures/order_87610.jpg`, order `#87610` / Kristen 38.5 / `53698_003`) → `order`.
 
 ## Decide (`POST /match/image/decide`)
 
@@ -101,8 +128,8 @@ Acceptance: exactly one verifier `same` without an exclusionary shape/pattern co
 
 ## Responsibility Boundary
 
-Python: isolate → SigLIP Top-N → verifier prompt/schema → MATCH/UNCERTAIN policy.
+Python: isolate → scene (shoe / order / garbage) → SigLIP Top-N only for shoes → verifier prompt/schema → MATCH/UNCERTAIN policy. Order extract is regex on OCR text (no OpenAI).
 
-Node: WATI download → S3 → `/match/image` → OpenAI Responses (`watiImageIdentity`) → `/match/image/decide` → persist `matched` / `uncertain` / `irrelevant`.
+Node: WATI download → S3 → `/match/image` → OpenAI Responses (`watiImageIdentity`) only for shoes → `/match/image/decide` → persist `matched` / `uncertain` / `order` / `garbage`.
 
 Do not use SigLIP cosine as a business identity cutoff. Two-tower `like_score` is unchanged.

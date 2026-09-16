@@ -62,6 +62,18 @@ uv pip install -p .venv/bin/python torch==2.13.0 --index-url https://download.py
     Write-Host '==> pip install skipped'
 }
 
+Write-Host '==> tesseract (order screenshot OCR)'
+$tessCmd = @'
+if command -v tesseract >/dev/null 2>&1; then
+  tesseract --version | head -1
+else
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tesseract-ocr
+  tesseract --version | head -1
+fi
+'@
+Write-Host (Invoke-Remote $tessCmd)
+
 Write-Host '==> restart pretty-reco-ml.service'
 Invoke-Remote 'sudo systemctl reset-failed pretty-reco-ml.service 2>/dev/null; sudo systemctl restart pretty-reco-ml.service' | Out-Null
 

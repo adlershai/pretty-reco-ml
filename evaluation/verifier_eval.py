@@ -202,7 +202,7 @@ def main() -> int:
             if decided["match"]:
                 returned = decided["match"]["model"]
                 returned_view = decided["match"].get("best_image_type")
-        elif status == "irrelevant":
+        elif status in {"irrelevant", "garbage", "order"}:
             reason = "relevance_gate"
         expected = row["expected"]
         if row["labelState"] == "confirmed":

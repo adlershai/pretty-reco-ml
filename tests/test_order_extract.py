@@ -1,0 +1,29 @@
+"""Parse order screenshot text (issue #4 fixture #87610 / Kristen 38.5)."""
+
+from __future__ import annotations
+
+from embeddings.order_extract import parse_order_fields
+
+
+ORDER_753_TEXT = """
+Thank You For Your Order
+הזמנתך #87610 התקבלה בהצלחה
+Your Order Number #87610 (30/08/2026)
+Kristen - 38.5
+(01 53698_003385)
+Subtotal: 1,190.00
+"""
+
+
+def test_parse_order_87610_kristen() -> None:
+    fields = parse_order_fields(ORDER_753_TEXT)
+    assert fields["order_number"] == "87610"
+    assert fields["model"] == "53698_003"
+    assert fields["size"] == "38.5"
+
+
+def test_parse_order_empty() -> None:
+    fields = parse_order_fields("a clothing advertisement")
+    assert fields["order_number"] is None
+    assert fields["model"] is None
+    assert fields["size"] is None

@@ -10,7 +10,14 @@ from PIL import Image
 
 from embeddings.catalog_index import CatalogIndex
 from embeddings.isolate import CropBox, crop_image, isolation_applied, propose_crops
-from embeddings.relevance import RELEVANCE_FOOTWEAR, RELEVANCE_IRRELEVANT
+from embeddings.order_extract import extract_order as default_extract_order, order_payload
+from embeddings.relevance import (
+    IMAGE_KIND_GARBAGE,
+    IMAGE_KIND_ORDER,
+    IMAGE_KIND_SHOE,
+    RELEVANCE_FOOTWEAR,
+    RELEVANCE_IRRELEVANT,
+)
 from embeddings.verifier import (
     build_verifier_request,
     crop_jpeg_base64,
@@ -49,6 +56,8 @@ class ImageMatchResult:
     scores: dict[str, float]
     embedding_model: str
     crop_scores: list[tuple[CropBox, float]]
+    image_kind: str = IMAGE_KIND_SHOE
+    order: dict[str, str | None] | None = None
 
 
 def _model_payload(hit: ModelHit) -> dict[str, Any]:
@@ -60,18 +69,59 @@ def _model_payload(hit: ModelHit) -> dict[str, Any]:
     }
 
 
+def _scene_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[str, float]]:
+    classify_scene = getattr(encoder, "classify_scene", None)
+    if callable(classify_scene):
+        return classify_scene(vector)
+    relevance, scores = encoder.classify_relevance(vector)
+    if relevance == RELEVANCE_FOOTWEAR:
+        return IMAGE_KIND_SHOE, scores
+    return IMAGE_KIND_GARBAGE, scores
+
+
 def match_image(
     image: Image.Image,
     encoder: VisionEncoder,
     catalog: CatalogIndex,
     *,
     top: int = DEFAULT_TOP,
+    extract_order_fn: Any = None,
 ) -> ImageMatchResult:
-    """Isolate a shoe region, then rank catalog models in 768D SigLIP space."""
+    """Route shoe / order / garbage, then rank catalog models only for shoes."""
     rgb = image.convert("RGB")
     boxes = propose_crops(rgb)
     crops = [crop_image(rgb, box) for box in boxes]
     vectors = encoder.encode_batch(crops)
+    scene, scene_scores = _scene_kind(encoder, vectors[0])
+
+    if scene == IMAGE_KIND_ORDER:
+        extract = extract_order_fn or default_extract_order
+        return ImageMatchResult(
+            match=None,
+            candidates=[],
+            crop=boxes[0],
+            shoe_isolated=False,
+            relevance=RELEVANCE_IRRELEVANT,
+            scores=scene_scores,
+            embedding_model=encoder.embedding_model,
+            crop_scores=[],
+            image_kind=IMAGE_KIND_ORDER,
+            order=order_payload(extract(rgb)),
+        )
+
+    if scene == IMAGE_KIND_GARBAGE:
+        return ImageMatchResult(
+            match=None,
+            candidates=[],
+            crop=boxes[0],
+            shoe_isolated=False,
+            relevance=RELEVANCE_IRRELEVANT,
+            scores=scene_scores,
+            embedding_model=encoder.embedding_model,
+            crop_scores=[],
+            image_kind=IMAGE_KIND_GARBAGE,
+            order=None,
+        )
 
     best_index: int | None = None
     best_score = float("-inf")
@@ -102,6 +152,8 @@ def match_image(
             scores=scores,
             embedding_model=encoder.embedding_model,
             crop_scores=crop_scores,
+            image_kind=IMAGE_KIND_GARBAGE,
+            order=None,
         )
 
     chosen = boxes[best_index]
@@ -117,6 +169,8 @@ def match_image(
         scores=gate_scores,
         embedding_model=encoder.embedding_model,
         crop_scores=crop_scores,
+        image_kind=IMAGE_KIND_SHOE,
+        order=None,
     )
 
 
@@ -147,8 +201,15 @@ def match_result_to_dict(
             catalog_rows=list(catalog.rows) if catalog is not None else [],
             verify_top=verify_top,
         )
+    kind = result.image_kind or (IMAGE_KIND_SHOE if footwear else IMAGE_KIND_GARBAGE)
+    if kind == IMAGE_KIND_ORDER:
+        status = "order"
+    elif kind == IMAGE_KIND_GARBAGE or not footwear:
+        status = "garbage"
+    else:
+        status = "needs_verification"
     return {
-        "status": "needs_verification" if footwear else "irrelevant",
+        "status": status,
         "match": None,
         "candidates": candidates,
         "preprocessing": preprocessing,
@@ -156,6 +217,8 @@ def match_result_to_dict(
         "relevance": result.relevance,
         "scores": result.scores,
         "embedding_model": result.embedding_model,
+        "image_kind": kind,
+        "order": result.order,
     }
 
 
