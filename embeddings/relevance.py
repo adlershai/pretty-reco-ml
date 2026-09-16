@@ -22,6 +22,9 @@ JUNK_PROMPTS: tuple[str, ...] = (
     "a paper document or receipt",
     "a meme or cartoon drawing",
     "an indoor photo with no product",
+    "a clothing or fashion advertisement with no shoes",
+    "a photo of a dress, shirt, coat, or pants",
+    "a website page of apparel, not a close-up of a shoe",
 )
 
 RELEVANCE_FOOTWEAR = "footwear"

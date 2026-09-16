@@ -95,3 +95,27 @@ def test_packshot_keeps_full_frame_when_it_is_the_best_crop() -> None:
     assert result.match.model == "40724_001"
     assert result.shoe_isolated is False
     assert result.crop.reason == "full"
+
+
+def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
+    class JunkEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.1, "irrelevant": 0.4}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="51604_004",
+                image_type="main",
+                embedding=_unit([0.0, 1.0, 0.0]),
+                model_id=4,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, JunkEncoder(), catalog, top=10)
+    assert result.match is None
+    assert result.candidates == []
+    assert result.relevance == "irrelevant"

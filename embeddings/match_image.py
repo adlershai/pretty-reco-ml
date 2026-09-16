@@ -10,7 +10,7 @@ from PIL import Image
 
 from embeddings.catalog_index import CatalogIndex
 from embeddings.isolate import CropBox, crop_image, isolation_applied, propose_crops
-from embeddings.relevance import RELEVANCE_FOOTWEAR
+from embeddings.relevance import RELEVANCE_FOOTWEAR, RELEVANCE_IRRELEVANT
 from embeddings.verifier import (
     build_verifier_request,
     crop_jpeg_base64,
@@ -73,41 +73,48 @@ def match_image(
     crops = [crop_image(rgb, box) for box in boxes]
     vectors = encoder.encode_batch(crops)
 
-    best_index = 0
+    best_index: int | None = None
     best_score = float("-inf")
     crop_scores: list[tuple[CropBox, float]] = []
+    gate_scores = {"footwear": 0.0, "irrelevant": 0.0}
     for index, vector in enumerate(vectors):
+        relevance, scores = encoder.classify_relevance(vector)
         models = catalog.search_models(vector, top=1)
         score = models[0].model_score if models else float("-inf")
         crop_scores.append((boxes[index], float(score) if np.isfinite(score) else float("-inf")))
-        if _prefer_crop(score, boxes[index], best_score, boxes[best_index]):
-            best_score = score
+        if relevance != RELEVANCE_FOOTWEAR:
+            continue
+        if best_index is None or _prefer_crop(score, boxes[index], best_score, boxes[best_index]):
             best_index = index
+            best_score = score
+            gate_scores = scores
 
-    chosen = boxes[best_index]
-    query = vectors[best_index]
-    relevance, scores = encoder.classify_relevance(query)
-    isolated = isolation_applied(chosen, rgb)
-    if relevance != RELEVANCE_FOOTWEAR:
+    if best_index is None:
+        chosen = boxes[0]
+        isolated = isolation_applied(chosen, rgb)
+        _relevance, scores = encoder.classify_relevance(vectors[0])
         return ImageMatchResult(
             match=None,
             candidates=[],
             crop=chosen,
             shoe_isolated=isolated,
-            relevance=relevance,
+            relevance=RELEVANCE_IRRELEVANT,
             scores=scores,
             embedding_model=encoder.embedding_model,
             crop_scores=crop_scores,
         )
 
+    chosen = boxes[best_index]
+    query = vectors[best_index]
+    isolated = isolation_applied(chosen, rgb)
     candidates = catalog.search_models(query, top=top)
     return ImageMatchResult(
         match=candidates[0] if candidates else None,
         candidates=candidates,
         crop=chosen,
         shoe_isolated=isolated,
-        relevance=relevance,
-        scores=scores,
+        relevance=RELEVANCE_FOOTWEAR,
+        scores=gate_scores,
         embedding_model=encoder.embedding_model,
         crop_scores=crop_scores,
     )

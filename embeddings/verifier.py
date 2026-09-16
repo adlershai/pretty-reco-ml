@@ -20,23 +20,31 @@ CROP_MAX_EDGE = 768
 REQUEST_TYPE = "watiImageIdentity"
 SHAPE_EXCLUDE = 0.5
 PATTERN_EXCLUDE = 0.5
+MATERIAL_EXCLUDE = 0.55
+DETAILS_EXCLUDE = 0.55
 
 DEVELOPER_PROMPT = """You verify Pretty Ballerinas catalog identity.
 
 The first image is a customer photo (shoe isolated). Each later group is one catalog
 candidate with every available packshot view (main, pers, side).
 
-Question: is the customer shoe THE SAME catalog model as that candidate?
-Not similar style, not similar color. Exact product identity.
+Question: is the customer shoe THE SAME catalog SKU as that candidate?
+Not similar style, not a close sister model, not similar color. Exact product identity.
 
-Inspect, in this order of importance:
-1. silhouette / toe / vamp / heel / proportions
-2. pattern type, geometry, repetition, scale
-3. construction details (toe cap, piping, seams, bows, buckles, trims)
-4. material / texture
-5. where colors sit on the shoe, not merely whether similar colors exist
+Inspect distinctive SKU-level evidence before global similarity:
+1. decorative hardware and stones — shape (square/diamond vs round), setting, size, spacing, repetition
+2. strap construction (width, count, crossing, attachments)
+3. bow construction and placement
+4. material / surface (suede vs smooth leather vs patent vs velvet vs textile)
+5. seams, piping, trims, toe cap
+6. toe / vamp geometry, heel, proportions
+7. pattern type, geometry, repetition, scale
+8. where colors sit on the shoe — last, and never enough to override a detail contradiction
 
-A major shape, pattern, or construction contradiction means DIFFERENT even if color matches.
+A clear contradiction in stone/hardware geometry, material, bow, strap, toe/vamp, or construction
+means DIFFERENT even when silhouette, pink lining, and overall black/ballet look match.
+Close sister models (example: studded Mary-Jane 49452 vs 54101) are DIFFERENT.
+
 If two candidates could both be the same model, mark extras uncertain rather than forcing same.
 
 Return one object per candidate, using the exact model codes from the labels."""
@@ -269,9 +277,19 @@ def parse_openai_output(openai_output: Any) -> dict[str, Any] | None:
 
 
 def _exclusionary(row: dict[str, Any]) -> bool:
-    if not row["contradictions"]:
-        return False
-    return row["shape"] < SHAPE_EXCLUDE or row["pattern"] < PATTERN_EXCLUDE
+    distinctive_low = (
+        row["shape"] < SHAPE_EXCLUDE
+        or row["pattern"] < PATTERN_EXCLUDE
+        or row["material"] < MATERIAL_EXCLUDE
+        or row["details"] < DETAILS_EXCLUDE
+    )
+    if row["contradictions"] and distinctive_low:
+        return True
+    if row["verdict"] == "same" and (
+        row["material"] < MATERIAL_EXCLUDE or row["details"] < DETAILS_EXCLUDE
+    ):
+        return True
+    return False
 
 
 def _confidence(row: dict[str, Any]) -> float:

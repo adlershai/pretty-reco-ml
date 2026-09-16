@@ -78,6 +78,41 @@ def test_exclusionary_contradiction_is_not_a_match() -> None:
     assert decision.model is None
 
 
+def test_similar_mary_jane_with_different_stones_is_not_a_match() -> None:
+    decision = decide_identity(
+        {
+            "candidates": [
+                _same(
+                    "49452_B",
+                    shape=0.92,
+                    pattern=0.88,
+                    material=0.4,
+                    details=0.35,
+                    color_placement=0.9,
+                    contradictions=["round stones vs small square/diamond stones"],
+                    reason="same black ballet silhouette but stone geometry differs",
+                )
+            ]
+        },
+        [{"model": "49452_B"}, {"model": "52196_A"}],
+    )
+    assert decision.status == "uncertain"
+    assert decision.model is None
+
+
+def test_same_with_low_details_is_not_a_match() -> None:
+    decision = decide_identity(
+        {
+            "candidates": [
+                _same("49452_B", details=0.4, material=0.4, contradictions=[]),
+            ]
+        },
+        [{"model": "49452_B"}],
+    )
+    assert decision.status == "uncertain"
+    assert decision.model is None
+
+
 def test_failed_openai_wrapper_is_uncertain() -> None:
     decision = decide_identity({"result": "failed", "message": "no key"}, [{"model": "A"}])
     assert decision.status == "uncertain"

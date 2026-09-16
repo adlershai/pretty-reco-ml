@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # Confirmed exact SKU. Events 726/722 are 53566_003 (customer photo is that model).
+# 721/727 vs 49452_B is a permanent hard-negative (stone/hardware sister models).
 CONFIRMED: dict[int, str] = {
     887: "53771_003",
     845: "52792_006",
