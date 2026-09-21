@@ -20,6 +20,7 @@ from embeddings.relevance import (
     GARBAGE_PROMPTS,
     JUNK_PROMPTS,
     ORDER_PROMPTS,
+    classify_non_shoe,
     classify_relevance,
     classify_scene,
 )
@@ -125,10 +126,18 @@ class VisionEncoder:
         return classify_relevance(image_vector, self._footwear_text, self._junk_text)
 
     def classify_scene(self, image_vector: np.ndarray) -> tuple[str, dict[str, float]]:
-        """Full-frame shoe vs order screenshot vs garbage (issue #4)."""
+        """Full-frame shoe vs order screenshot vs garbage (diagnostics)."""
         return classify_scene(
             image_vector,
             self._footwear_text,
+            self._garbage_text,
+            self._order_text,
+        )
+
+    def classify_non_shoe(self, image_vector: np.ndarray) -> tuple[str, dict[str, float]]:
+        """Order vs garbage after shoe detection has already failed."""
+        return classify_non_shoe(
+            image_vector,
             self._garbage_text,
             self._order_text,
         )

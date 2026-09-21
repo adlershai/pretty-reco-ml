@@ -112,5 +112,31 @@ def classify_scene(
     return IMAGE_KIND_GARBAGE, scores
 
 
+def classify_non_shoe(
+    image_vector: np.ndarray,
+    garbage_vectors: np.ndarray,
+    order_vectors: np.ndarray,
+) -> tuple[str, dict[str, float]]:
+    """Order vs garbage after Step 1 already rejected an identifiable shoe."""
+    image = np.asarray(image_vector, dtype=np.float32).reshape(-1)
+    garbage = np.asarray(garbage_vectors, dtype=np.float32)
+    order = np.asarray(order_vectors, dtype=np.float32)
+    if garbage.ndim != 2 or order.ndim != 2:
+        raise ValueError("prompt matrices must be 2-D")
+    if image.shape[0] != garbage.shape[1] or image.shape[0] != order.shape[1]:
+        raise ValueError("image and prompt embedding dimensions must match")
+
+    garbage_score = float(np.max(garbage @ image))
+    order_score = float(np.max(order @ image))
+    scores = {
+        IMAGE_KIND_ORDER: order_score,
+        IMAGE_KIND_GARBAGE: garbage_score,
+        RELEVANCE_IRRELEVANT: garbage_score,
+    }
+    if order_score >= garbage_score:
+        return IMAGE_KIND_ORDER, scores
+    return IMAGE_KIND_GARBAGE, scores
+
+
 def all_prompts() -> Sequence[str]:
     return (*FOOTWEAR_PROMPTS, *JUNK_PROMPTS, *ORDER_PROMPTS, *GARBAGE_PROMPTS)

@@ -8,6 +8,7 @@ from embeddings.relevance import (
     IMAGE_KIND_GARBAGE,
     IMAGE_KIND_ORDER,
     IMAGE_KIND_SHOE,
+    classify_non_shoe,
     classify_scene,
 )
 
@@ -39,3 +40,20 @@ def test_shoe_wins_when_closer_to_footwear() -> None:
     order = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
     kind, _scores = classify_scene(image, footwear, garbage, order)
     assert kind == IMAGE_KIND_SHOE
+
+
+def test_non_shoe_order_does_not_compete_with_footwear() -> None:
+    image = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    garbage = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+    order = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+    kind, scores = classify_non_shoe(image, garbage, order)
+    assert kind == IMAGE_KIND_ORDER
+    assert scores["order"] > scores["garbage"]
+
+
+def test_non_shoe_garbage_when_order_is_weak() -> None:
+    image = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    garbage = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+    order = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+    kind, _scores = classify_non_shoe(image, garbage, order)
+    assert kind == IMAGE_KIND_GARBAGE

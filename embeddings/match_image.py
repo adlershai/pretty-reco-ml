@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from embeddings.catalog_index import CatalogIndex
-from embeddings.isolate import CropBox, crop_image, isolation_applied, propose_crops
+from embeddings.isolate import MIN_PANEL_AREA, CropBox, crop_image, isolation_applied, propose_crops
 from embeddings.order_extract import extract_order as default_extract_order, order_payload
 from embeddings.relevance import (
     IMAGE_KIND_GARBAGE,
@@ -29,6 +29,8 @@ from evaluation.image_match import ModelHit
 
 DEFAULT_TOP = 10
 SCORE_TIE = 1e-6
+# Issue #4 WATI set, 2026-09-21: 753/736 max catalog 0.572; 1070 PDP min 0.655.
+CATALOG_SHOE_MIN = 0.62
 
 
 def _prefer_crop(score: float, box: CropBox, best_score: float, best_box: CropBox) -> bool:
@@ -69,6 +71,40 @@ def _model_payload(hit: ModelHit) -> dict[str, Any]:
     }
 
 
+def _crop_fraction(box: CropBox, image: Image.Image) -> float:
+    width, height = image.size
+    return box.area / float(max(1, width * height))
+
+
+def _usable_shoe_crop(box: CropBox, image: Image.Image) -> bool:
+    """Tiny thumbnails inside an order table must not count as the whole image."""
+    if box.reason == "full":
+        return True
+    return _crop_fraction(box, image) >= MIN_PANEL_AREA
+
+
+def _catalog_score(catalog: CatalogIndex, vector: np.ndarray) -> float:
+    hits = catalog.search_models(vector, top=1)
+    if not hits:
+        return float("-inf")
+    score = float(hits[0].model_score)
+    return score if np.isfinite(score) else float("-inf")
+
+
+def _is_identifiable_shoe(
+    relevance: str,
+    catalog_score: float,
+    box: CropBox,
+    image: Image.Image,
+) -> bool:
+    """Step 1: footwear prompt or strong PB catalog evidence on a usable crop."""
+    if not _usable_shoe_crop(box, image):
+        return False
+    if relevance == RELEVANCE_FOOTWEAR:
+        return True
+    return catalog_score >= CATALOG_SHOE_MIN
+
+
 def _scene_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[str, float]]:
     classify_scene = getattr(encoder, "classify_scene", None)
     if callable(classify_scene):
@@ -79,6 +115,16 @@ def _scene_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[s
     return IMAGE_KIND_GARBAGE, scores
 
 
+def _non_shoe_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[str, float]]:
+    classify_non_shoe = getattr(encoder, "classify_non_shoe", None)
+    if callable(classify_non_shoe):
+        return classify_non_shoe(vector)
+    scene, scores = _scene_kind(encoder, vector)
+    if scene == IMAGE_KIND_SHOE:
+        return IMAGE_KIND_GARBAGE, scores
+    return scene, scores
+
+
 def match_image(
     image: Image.Image,
     encoder: VisionEncoder,
@@ -87,13 +133,46 @@ def match_image(
     top: int = DEFAULT_TOP,
     extract_order_fn: Any = None,
 ) -> ImageMatchResult:
-    """Route shoe / order / garbage, then rank catalog models only for shoes."""
+    """Shoe first; order only after shoe detection fails. Then garbage."""
     rgb = image.convert("RGB")
     boxes = propose_crops(rgb)
     crops = [crop_image(rgb, box) for box in boxes]
     vectors = encoder.encode_batch(crops)
-    scene, scene_scores = _scene_kind(encoder, vectors[0])
 
+    best_index: int | None = None
+    best_score = float("-inf")
+    crop_scores: list[tuple[CropBox, float]] = []
+    gate_scores = {"footwear": 0.0, "irrelevant": 0.0, "catalog": float("-inf")}
+    for index, vector in enumerate(vectors):
+        relevance, scores = encoder.classify_relevance(vector)
+        catalog_score = _catalog_score(catalog, vector)
+        crop_scores.append((boxes[index], catalog_score))
+        if not _is_identifiable_shoe(relevance, catalog_score, boxes[index], rgb):
+            continue
+        if best_index is None or _prefer_crop(catalog_score, boxes[index], best_score, boxes[best_index]):
+            best_index = index
+            best_score = catalog_score
+            gate_scores = {**scores, "catalog": catalog_score}
+
+    if best_index is not None:
+        chosen = boxes[best_index]
+        query = vectors[best_index]
+        isolated = isolation_applied(chosen, rgb)
+        candidates = catalog.search_models(query, top=top)
+        return ImageMatchResult(
+            match=candidates[0] if candidates else None,
+            candidates=candidates,
+            crop=chosen,
+            shoe_isolated=isolated,
+            relevance=RELEVANCE_FOOTWEAR,
+            scores=gate_scores,
+            embedding_model=encoder.embedding_model,
+            crop_scores=crop_scores,
+            image_kind=IMAGE_KIND_SHOE,
+            order=None,
+        )
+
+    scene, scene_scores = _non_shoe_kind(encoder, vectors[0])
     if scene == IMAGE_KIND_ORDER:
         extract = extract_order_fn or default_extract_order
         return ImageMatchResult(
@@ -104,72 +183,23 @@ def match_image(
             relevance=RELEVANCE_IRRELEVANT,
             scores=scene_scores,
             embedding_model=encoder.embedding_model,
-            crop_scores=[],
+            crop_scores=crop_scores,
             image_kind=IMAGE_KIND_ORDER,
             order=order_payload(extract(rgb)),
         )
 
-    if scene == IMAGE_KIND_GARBAGE:
-        return ImageMatchResult(
-            match=None,
-            candidates=[],
-            crop=boxes[0],
-            shoe_isolated=False,
-            relevance=RELEVANCE_IRRELEVANT,
-            scores=scene_scores,
-            embedding_model=encoder.embedding_model,
-            crop_scores=[],
-            image_kind=IMAGE_KIND_GARBAGE,
-            order=None,
-        )
-
-    best_index: int | None = None
-    best_score = float("-inf")
-    crop_scores: list[tuple[CropBox, float]] = []
-    gate_scores = {"footwear": 0.0, "irrelevant": 0.0}
-    for index, vector in enumerate(vectors):
-        relevance, scores = encoder.classify_relevance(vector)
-        models = catalog.search_models(vector, top=1)
-        score = models[0].model_score if models else float("-inf")
-        crop_scores.append((boxes[index], float(score) if np.isfinite(score) else float("-inf")))
-        if relevance != RELEVANCE_FOOTWEAR:
-            continue
-        if best_index is None or _prefer_crop(score, boxes[index], best_score, boxes[best_index]):
-            best_index = index
-            best_score = score
-            gate_scores = scores
-
-    if best_index is None:
-        chosen = boxes[0]
-        isolated = isolation_applied(chosen, rgb)
-        _relevance, scores = encoder.classify_relevance(vectors[0])
-        return ImageMatchResult(
-            match=None,
-            candidates=[],
-            crop=chosen,
-            shoe_isolated=isolated,
-            relevance=RELEVANCE_IRRELEVANT,
-            scores=scores,
-            embedding_model=encoder.embedding_model,
-            crop_scores=crop_scores,
-            image_kind=IMAGE_KIND_GARBAGE,
-            order=None,
-        )
-
-    chosen = boxes[best_index]
-    query = vectors[best_index]
+    chosen = boxes[0]
     isolated = isolation_applied(chosen, rgb)
-    candidates = catalog.search_models(query, top=top)
     return ImageMatchResult(
-        match=candidates[0] if candidates else None,
-        candidates=candidates,
+        match=None,
+        candidates=[],
         crop=chosen,
         shoe_isolated=isolated,
-        relevance=RELEVANCE_FOOTWEAR,
-        scores=gate_scores,
+        relevance=RELEVANCE_IRRELEVANT,
+        scores=scene_scores,
         embedding_model=encoder.embedding_model,
         crop_scores=crop_scores,
-        image_kind=IMAGE_KIND_SHOE,
+        image_kind=IMAGE_KIND_GARBAGE,
         order=None,
     )
 

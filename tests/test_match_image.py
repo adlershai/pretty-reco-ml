@@ -36,6 +36,9 @@ class FakeEncoder:
     def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
         return "footwear", {"footwear": 0.4, "irrelevant": 0.1}
 
+    def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+        return "order", {"footwear": 0.05, "irrelevant": 0.2, "order": 0.5, "garbage": 0.2}
+
 
 def test_match_image_picks_isolated_panel() -> None:
     image = Image.new("RGB", (200, 500), (20, 20, 22))
@@ -64,6 +67,7 @@ def test_match_image_picks_isolated_panel() -> None:
     result = match_image(image, FakeEncoder(), catalog, top=10)
     assert result.match is not None
     assert result.match.model == "52792_006"
+    assert result.image_kind == "shoe"
     assert result.match.best_image_type == "side"
     assert result.shoe_isolated is True
     payload = match_result_to_dict(result, image_size=image.size, image=image, catalog=catalog)
@@ -102,13 +106,19 @@ def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
         def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
             return "irrelevant", {"footwear": 0.1, "irrelevant": 0.4}
 
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "garbage", {"footwear": 0.1, "irrelevant": 0.4, "order": 0.05, "garbage": 0.4}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "garbage", {"order": 0.05, "garbage": 0.4, "irrelevant": 0.4}
+
     image = Image.new("RGB", (200, 200), (236, 228, 230))
     catalog = CatalogIndex.from_rows(
         [
             CatalogImage(
                 model="51604_004",
                 image_type="main",
-                embedding=_unit([0.0, 1.0, 0.0]),
+                embedding=_unit([0.0, 0.0, 1.0]),
                 model_id=4,
                 embedding_model="google/siglip-base-patch16-224",
                 embedding_dimension=EMBEDDING_DIMENSION,
@@ -140,7 +150,7 @@ def test_match_image_routes_order_without_catalog_search() -> None:
             CatalogImage(
                 model="51604_004",
                 image_type="main",
-                embedding=_unit([0.0, 1.0, 0.0]),
+                embedding=_unit([0.0, 0.0, 1.0]),
                 model_id=4,
                 embedding_model="google/siglip-base-patch16-224",
                 embedding_dimension=EMBEDDING_DIMENSION,
@@ -170,3 +180,31 @@ def test_match_image_routes_order_without_catalog_search() -> None:
     assert payload["status"] == "order"
     assert payload["verifier"] is None
     assert payload["order"]["order_number"] == "87610"
+
+
+def test_match_image_catalog_evidence_beats_order_scene() -> None:
+    class CatalogOnlyEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.07, "irrelevant": 0.10}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "order", {"footwear": 0.07, "irrelevant": 0.10, "order": 0.20, "garbage": 0.10}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="53235_007",
+                image_type="pers",
+                embedding=_unit([0.0, 1.0, 0.0]),
+                model_id=5,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, CatalogOnlyEncoder(), catalog, top=10)
+    assert result.image_kind == "shoe"
+    assert result.match is not None
+    assert result.match.model == "53235_007"
+    assert result.order is None
