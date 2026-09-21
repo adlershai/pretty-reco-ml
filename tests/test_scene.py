@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from embeddings.relevance import (
+    IMAGE_KIND_DELIVERY,
     IMAGE_KIND_GARBAGE,
     IMAGE_KIND_ORDER,
     IMAGE_KIND_SHOE,
@@ -46,14 +47,27 @@ def test_non_shoe_order_does_not_compete_with_footwear() -> None:
     image = np.array([0.0, 0.0, 1.0], dtype=np.float32)
     garbage = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
     order = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-    kind, scores = classify_non_shoe(image, garbage, order)
+    delivery = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+    kind, scores = classify_non_shoe(image, garbage, order, delivery)
     assert kind == IMAGE_KIND_ORDER
     assert scores["order"] > scores["garbage"]
+    assert scores["order"] > scores["delivery_notice"]
+
+
+def test_non_shoe_delivery_beats_order_when_closer() -> None:
+    image = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    garbage = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
+    order = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
+    delivery = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+    kind, scores = classify_non_shoe(image, garbage, order, delivery)
+    assert kind == IMAGE_KIND_DELIVERY
+    assert scores["delivery_notice"] > scores["order"]
 
 
 def test_non_shoe_garbage_when_order_is_weak() -> None:
     image = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     garbage = np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
     order = np.array([[0.0, 0.0, 1.0]], dtype=np.float32)
-    kind, _scores = classify_non_shoe(image, garbage, order)
+    delivery = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+    kind, _scores = classify_non_shoe(image, garbage, order, delivery)
     assert kind == IMAGE_KIND_GARBAGE

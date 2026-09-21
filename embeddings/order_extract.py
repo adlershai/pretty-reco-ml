@@ -12,13 +12,13 @@ from typing import Any
 from PIL import Image
 
 ORDER_NUMBER_RE = re.compile(
-    r'(?:order\s*number|הזמנה[#\s:]*)\s*#?\s*(\d{5,6})\b',
+    r'(?:new\s*order|order\s*number|מספר\s*הזמנה|הזמנה)\s*[:#\s]*([A-Z]{0,3}\d{5,12})\b',
     re.IGNORECASE,
 )
 HASH_ORDER_RE = re.compile(r'#(\d{5,6})\b')
 MODEL_RE = re.compile(r'(?<!\d)(\d{5}_\d{3})(?:\d{2,3})?(?!\d)')
 SIZE_RE = re.compile(
-    r'(?:[-–]|size|מידה)\s*(3[5-9](?:\.5)?|4[0-2](?:\.5)?)',
+    r'(?:[-–]|size|מידה)\s*(3[5-9](?:\.[05])?|4[0-2](?:\.[05])?)',
     re.IGNORECASE,
 )
 

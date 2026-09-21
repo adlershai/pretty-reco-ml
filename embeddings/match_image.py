@@ -9,9 +9,19 @@ import numpy as np
 from PIL import Image
 
 from embeddings.catalog_index import CatalogIndex
+from embeddings.delivery_extract import (
+    delivery_payload,
+    extract_delivery as default_extract_delivery,
+)
+from embeddings.document_kind import classify_document_kind
 from embeddings.isolate import MIN_PANEL_AREA, CropBox, crop_image, isolation_applied, propose_crops
-from embeddings.order_extract import extract_order as default_extract_order, order_payload
+from embeddings.order_extract import (
+    extract_order as default_extract_order,
+    ocr_image_text,
+    order_payload,
+)
 from embeddings.relevance import (
+    IMAGE_KIND_DELIVERY,
     IMAGE_KIND_GARBAGE,
     IMAGE_KIND_ORDER,
     IMAGE_KIND_SHOE,
@@ -60,6 +70,7 @@ class ImageMatchResult:
     crop_scores: list[tuple[CropBox, float]]
     image_kind: str = IMAGE_KIND_SHOE
     order: dict[str, str | None] | None = None
+    delivery: dict[str, str | None] | None = None
 
 
 def _model_payload(hit: ModelHit) -> dict[str, Any]:
@@ -132,6 +143,7 @@ def match_image(
     *,
     top: int = DEFAULT_TOP,
     extract_order_fn: Any = None,
+    extract_delivery_fn: Any = None,
 ) -> ImageMatchResult:
     """Shoe first; order only after shoe detection fails. Then garbage."""
     rgb = image.convert("RGB")
@@ -170,11 +182,17 @@ def match_image(
             crop_scores=crop_scores,
             image_kind=IMAGE_KIND_SHOE,
             order=None,
+            delivery=None,
         )
 
     scene, scene_scores = _non_shoe_kind(encoder, vectors[0])
-    if scene == IMAGE_KIND_ORDER:
-        extract = extract_order_fn or default_extract_order
+    text = ocr_image_text(rgb)
+    kind = classify_document_kind(text) or scene
+    if kind == IMAGE_KIND_ORDER:
+        if extract_order_fn:
+            fields = extract_order_fn(rgb)
+        else:
+            fields = default_extract_order(rgb, text=text)
         return ImageMatchResult(
             match=None,
             candidates=[],
@@ -185,7 +203,27 @@ def match_image(
             embedding_model=encoder.embedding_model,
             crop_scores=crop_scores,
             image_kind=IMAGE_KIND_ORDER,
-            order=order_payload(extract(rgb)),
+            order=order_payload(fields),
+            delivery=None,
+        )
+
+    if kind == IMAGE_KIND_DELIVERY:
+        if extract_delivery_fn:
+            fields = extract_delivery_fn(rgb)
+        else:
+            fields = default_extract_delivery(rgb, text=text)
+        return ImageMatchResult(
+            match=None,
+            candidates=[],
+            crop=boxes[0],
+            shoe_isolated=False,
+            relevance=RELEVANCE_IRRELEVANT,
+            scores=scene_scores,
+            embedding_model=encoder.embedding_model,
+            crop_scores=crop_scores,
+            image_kind=IMAGE_KIND_DELIVERY,
+            order=None,
+            delivery=delivery_payload(fields),
         )
 
     chosen = boxes[0]
@@ -201,6 +239,7 @@ def match_image(
         crop_scores=crop_scores,
         image_kind=IMAGE_KIND_GARBAGE,
         order=None,
+        delivery=None,
     )
 
 
@@ -234,6 +273,8 @@ def match_result_to_dict(
     kind = result.image_kind or (IMAGE_KIND_SHOE if footwear else IMAGE_KIND_GARBAGE)
     if kind == IMAGE_KIND_ORDER:
         status = "order"
+    elif kind == IMAGE_KIND_DELIVERY:
+        status = "delivery_notice"
     elif kind == IMAGE_KIND_GARBAGE or not footwear:
         status = "garbage"
     else:
@@ -249,6 +290,7 @@ def match_result_to_dict(
         "embedding_model": result.embedding_model,
         "image_kind": kind,
         "order": result.order,
+        "delivery": result.delivery,
     }
 
 

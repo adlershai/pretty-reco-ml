@@ -16,6 +16,7 @@ from PIL import Image
 from transformers import AutoModel, AutoTokenizer, SiglipImageProcessorPil
 
 from embeddings.relevance import (
+    DELIVERY_PROMPTS,
     FOOTWEAR_PROMPTS,
     GARBAGE_PROMPTS,
     JUNK_PROMPTS,
@@ -68,6 +69,7 @@ class VisionEncoder:
         self._footwear_text = self.encode_text(FOOTWEAR_PROMPTS)
         self._junk_text = self.encode_text(JUNK_PROMPTS)
         self._order_text = self.encode_text(ORDER_PROMPTS)
+        self._delivery_text = self.encode_text(DELIVERY_PROMPTS)
         self._garbage_text = self.encode_text(GARBAGE_PROMPTS)
 
     @property
@@ -135,9 +137,10 @@ class VisionEncoder:
         )
 
     def classify_non_shoe(self, image_vector: np.ndarray) -> tuple[str, dict[str, float]]:
-        """Order vs garbage after shoe detection has already failed."""
+        """Order vs delivery notice vs garbage after shoe detection has failed."""
         return classify_non_shoe(
             image_vector,
             self._garbage_text,
             self._order_text,
+            self._delivery_text,
         )

@@ -182,6 +182,56 @@ def test_match_image_routes_order_without_catalog_search() -> None:
     assert payload["order"]["order_number"] == "87610"
 
 
+def test_match_image_routes_delivery_notice_without_catalog_search() -> None:
+    class DeliveryEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.05, "irrelevant": 0.4}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "delivery_notice", {
+                "order": 0.12,
+                "delivery_notice": 0.4,
+                "garbage": 0.1,
+                "irrelevant": 0.1,
+            }
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="51604_004",
+                image_type="main",
+                embedding=_unit([0.0, 0.0, 1.0]),
+                model_id=4,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(
+        image,
+        DeliveryEncoder(),
+        catalog,
+        top=10,
+        extract_delivery_fn=lambda _img: {
+            "tracking_number": "102312132",
+            "status": "on_the_way",
+        },
+    )
+    assert result.match is None
+    assert result.candidates == []
+    assert result.image_kind == "delivery_notice"
+    assert result.order is None
+    assert result.delivery == {
+        "tracking_number": "102312132",
+        "status": "on_the_way",
+    }
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "delivery_notice"
+    assert payload["verifier"] is None
+    assert payload["delivery"]["tracking_number"] == "102312132"
+
+
 def test_match_image_catalog_evidence_beats_order_scene() -> None:
     class CatalogOnlyEncoder(FakeEncoder):
         def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:

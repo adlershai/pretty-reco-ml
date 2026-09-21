@@ -70,6 +70,21 @@ def test_753_order_screenshot_still_order(encoder, catalog) -> None:
 
 
 @pytest.mark.live
+def test_1057_on_the_way_is_delivery_notice(encoder, catalog) -> None:
+    path = FIXTURES / "wati_1057.jpg"
+    if not path.is_file():
+        pytest.skip("wati_1057.jpg fixture is missing")
+    image = Image.open(path).convert("RGB")
+    result = match_image(image, encoder, catalog, top=10)
+    assert result.image_kind == "delivery_notice", (
+        f"1057 routed {result.image_kind} scores={result.scores}"
+    )
+    assert result.match is None
+    assert result.candidates == []
+    assert result.order is None
+
+
+@pytest.mark.live
 def test_736_clothing_ad_still_garbage(encoder, catalog) -> None:
     with requests.Session() as session:
         image = decode_image(download_image_bytes(EVENT_736_URL, session))
@@ -87,6 +102,7 @@ def test_routing_confusion_matrix(encoder, catalog) -> None:
         ("1068", "shoe", SHOE_FIXTURES[2][1]),
         ("1071", "shoe", SHOE_FIXTURES[3][1]),
         ("753", "order", FIXTURES / "order_87610.jpg"),
+        ("1057", "delivery_notice", FIXTURES / "wati_1057.jpg"),
     ]
     with requests.Session() as session:
         image_736 = decode_image(download_image_bytes(EVENT_736_URL, session))
@@ -104,25 +120,28 @@ def test_routing_confusion_matrix(encoder, catalog) -> None:
     predicted["736"] = result_736.image_kind
     details.append(f"736 expected=garbage got={result_736.image_kind} scores={result_736.scores}")
     assert result_736.image_kind == "garbage", details[-1]
-    kinds = ("shoe", "order", "garbage")
+    kinds = ("shoe", "order", "delivery_notice", "garbage")
     expected_map = {
         "1070": "shoe",
         "1072": "shoe",
         "1068": "shoe",
         "1071": "shoe",
         "753": "order",
+        "1057": "delivery_notice",
         "736": "garbage",
     }
     matrix = {row: {col: 0 for col in kinds} for row in kinds}
     for event_id, expected in expected_map.items():
         matrix[expected][predicted[event_id]] += 1
     print("routing confusion matrix (rows=expected, cols=predicted)")
-    print("         " + " ".join(f"{kind:8}" for kind in kinds))
+    print("         " + " ".join(f"{kind:16}" for kind in kinds))
     for row in kinds:
-        cells = " ".join(f"{matrix[row][col]:8}" for col in kinds)
-        print(f"{row:8} {cells}")
+        cells = " ".join(f"{matrix[row][col]:16}" for col in kinds)
+        print(f"{row:16} {cells}")
     for line in details:
         print(line)
     assert matrix["shoe"]["order"] == 0
+    assert matrix["shoe"]["delivery_notice"] == 0
     assert matrix["order"]["shoe"] == 0
+    assert matrix["delivery_notice"]["order"] == 0
     assert matrix["garbage"]["shoe"] == 0

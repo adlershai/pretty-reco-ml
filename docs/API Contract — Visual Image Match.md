@@ -61,9 +61,9 @@ Footwear:
 
 `match` is null until `/match/image/decide`. SigLIP cosine on `candidates` is retrieval similarity, not identity confidence.
 
-When `relevance` is `irrelevant`, `status` is `garbage` or `order`, `verifier` is null, and `candidates` is empty. `image_kind` is `shoe` | `order` | `garbage`.
+When `relevance` is `irrelevant`, `status` is `garbage`, `order`, or `delivery_notice`, `verifier` is null, and `candidates` is empty. `image_kind` is `shoe` | `order` | `delivery_notice` | `garbage`.
 
-Non-shoe (issue #4): the full frame is classified first. Order screenshots skip catalog search even if a tiny product thumbnail looks like a shoe. Garbage (clothing ads, gowns, unrelated photos) also skips SKU matching.
+Non-shoe (issue #4): shoe detection runs first. Only if that fails does the router classify ORDER vs DELIVERY_NOTICE vs GARBAGE. Order and delivery never compete with a positive shoe decision.
 
 Order:
 
@@ -81,14 +81,28 @@ Order:
   },
   "verifier": null,
   "relevance": "irrelevant",
-  "scores": {"footwear": 0.08, "irrelevant": 0.12, "order": 0.31, "garbage": 0.12},
+  "scores": {"footwear": 0.08, "irrelevant": 0.12, "order": 0.31, "delivery_notice": 0.11, "garbage": 0.12},
   "embedding_model": "google/siglip-base-patch16-224",
   "image_kind": "order",
-  "order": {"order_number": "87610", "model": "53698_003", "size": "38.5"}
+  "order": {"order_number": "87610", "model": "53698_003", "size": "38.5"},
+  "delivery": null
 }
 ```
 
-Permanent fixtures: WATI **736** clothing ad → `garbage`; WATI **753** (`tests/fixtures/order_87610.jpg`, order `#87610` / Kristen 38.5 / `53698_003`) → `order`.
+Delivery notice (WATI **1057**, `tests/fixtures/wati_1057.jpg`):
+
+```json
+{
+  "status": "delivery_notice",
+  "image_kind": "delivery_notice",
+  "order": null,
+  "delivery": {"tracking_number": "102312132", "status": "on_the_way"}
+}
+```
+
+A tracking/order number on a shipment email must not by itself make the image an ORDER. Classify by primary purpose.
+
+Permanent fixtures: WATI **736** clothing ad → `garbage`; WATI **753** (`tests/fixtures/order_87610.jpg`, order `#87610` / Kristen 38.5 / `53698_003`) → `order`; WATI **1057** On The Way tracking → `delivery_notice`.
 
 ## Decide (`POST /match/image/decide`)
 

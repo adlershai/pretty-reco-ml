@@ -86,6 +86,11 @@ class OrderExtract(BaseModel):
     size: str | None = None
 
 
+class DeliveryExtract(BaseModel):
+    tracking_number: str | None = None
+    status: str | None = None
+
+
 class ImageMatchPreprocessing(BaseModel):
     shoe_isolated: bool
     crop: list[int]
@@ -95,7 +100,15 @@ class ImageMatchPreprocessing(BaseModel):
 
 
 class ImageMatchResponse(BaseModel):
-    status: Literal["needs_verification", "irrelevant", "match", "uncertain", "order", "garbage"]
+    status: Literal[
+        "needs_verification",
+        "irrelevant",
+        "match",
+        "uncertain",
+        "order",
+        "delivery_notice",
+        "garbage",
+    ]
     match: ImageMatchCandidate | None = None
     candidates: list[ImageMatchCandidate]
     preprocessing: ImageMatchPreprocessing
@@ -103,8 +116,9 @@ class ImageMatchResponse(BaseModel):
     relevance: Literal["footwear", "irrelevant"]
     scores: dict[str, float]
     embedding_model: str
-    image_kind: Literal["shoe", "order", "garbage"] = "shoe"
+    image_kind: Literal["shoe", "order", "delivery_notice", "garbage"] = "shoe"
     order: OrderExtract | None = None
+    delivery: DeliveryExtract | None = None
 
 
 class ImageMatchDecideRequest(BaseModel):

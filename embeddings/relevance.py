@@ -34,6 +34,14 @@ ORDER_PROMPTS: tuple[str, ...] = (
     "a screenshot of an online shoe store order confirmation with an order number",
     "a thank you for your order email showing a product table and price",
     "a Pretty Ballerinas order summary with billing and shipping address",
+    "a New Order email with an order number, product, size, and price",
+)
+
+DELIVERY_PROMPTS: tuple[str, ...] = (
+    "a screenshot that says On The Way",
+    "On The Way!",
+    "a parcel delivery notice that items are packed and on the way to the customer",
+    "a courier tracking screenshot with a shipment number",
 )
 
 GARBAGE_PROMPTS: tuple[str, ...] = (
@@ -51,6 +59,7 @@ RELEVANCE_IRRELEVANT = "irrelevant"
 
 IMAGE_KIND_SHOE = "shoe"
 IMAGE_KIND_ORDER = "order"
+IMAGE_KIND_DELIVERY = "delivery_notice"
 IMAGE_KIND_GARBAGE = "garbage"
 
 
@@ -116,27 +125,40 @@ def classify_non_shoe(
     image_vector: np.ndarray,
     garbage_vectors: np.ndarray,
     order_vectors: np.ndarray,
+    delivery_vectors: np.ndarray,
 ) -> tuple[str, dict[str, float]]:
-    """Order vs garbage after Step 1 already rejected an identifiable shoe."""
+    """Order vs delivery notice vs garbage after shoe detection has failed."""
     image = np.asarray(image_vector, dtype=np.float32).reshape(-1)
     garbage = np.asarray(garbage_vectors, dtype=np.float32)
     order = np.asarray(order_vectors, dtype=np.float32)
-    if garbage.ndim != 2 or order.ndim != 2:
+    delivery = np.asarray(delivery_vectors, dtype=np.float32)
+    if garbage.ndim != 2 or order.ndim != 2 or delivery.ndim != 2:
         raise ValueError("prompt matrices must be 2-D")
-    if image.shape[0] != garbage.shape[1] or image.shape[0] != order.shape[1]:
+    dim = image.shape[0]
+    if garbage.shape[1] != dim or order.shape[1] != dim or delivery.shape[1] != dim:
         raise ValueError("image and prompt embedding dimensions must match")
 
     garbage_score = float(np.max(garbage @ image))
     order_score = float(np.max(order @ image))
+    delivery_score = float(np.max(delivery @ image))
     scores = {
         IMAGE_KIND_ORDER: order_score,
+        IMAGE_KIND_DELIVERY: delivery_score,
         IMAGE_KIND_GARBAGE: garbage_score,
         RELEVANCE_IRRELEVANT: garbage_score,
     }
-    if order_score >= garbage_score:
+    if order_score >= delivery_score and order_score >= garbage_score:
         return IMAGE_KIND_ORDER, scores
+    if delivery_score >= garbage_score:
+        return IMAGE_KIND_DELIVERY, scores
     return IMAGE_KIND_GARBAGE, scores
 
 
 def all_prompts() -> Sequence[str]:
-    return (*FOOTWEAR_PROMPTS, *JUNK_PROMPTS, *ORDER_PROMPTS, *GARBAGE_PROMPTS)
+    return (
+        *FOOTWEAR_PROMPTS,
+        *JUNK_PROMPTS,
+        *ORDER_PROMPTS,
+        *DELIVERY_PROMPTS,
+        *GARBAGE_PROMPTS,
+    )

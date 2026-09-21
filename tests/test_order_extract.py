@@ -27,3 +27,21 @@ def test_parse_order_empty() -> None:
     assert fields["order_number"] is None
     assert fields["model"] is None
     assert fields["size"] is None
+
+
+def test_parse_new_order_87919() -> None:
+    fields = parse_order_fields("Pretty Ballerinas\nNew Order: #87919")
+    assert fields["order_number"] == "87919"
+
+
+def test_parse_hebrew_order_bs580427134() -> None:
+    text = """
+Pretty Ballerinas
+מספר הזמנה BS580427134
+Kristen - 40.0
+52797_004
+"""
+    fields = parse_order_fields(text)
+    assert fields["order_number"] == "BS580427134"
+    assert fields["model"] == "52797_004"
+    assert fields["size"] == "40.0"
