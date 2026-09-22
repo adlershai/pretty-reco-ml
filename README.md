@@ -107,6 +107,8 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | `POST /embeddings/query` | header `X-API-Key` | one image (base64) → embedding + footwear/irrelevant gate |
 | `POST /match/image` | header `X-API-Key` | isolate + SigLIP Top-N; returns `needs_verification` + verifier payload (no OpenAI) |
 | `POST /match/image/decide` | header `X-API-Key` | OpenAI verifier JSON → `match` or `uncertain` |
+| `POST /embeddings/text` | header `X-API-Key` | multilingual text → normalized embedding(s) |
+| `POST /similarity/text` | header `X-API-Key` | query text + candidate vectors → cosine Top-K |
 
 Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key.
 
@@ -259,3 +261,17 @@ python -m inference.report_like_score --new-models path/to/load.csv --latest
 ```
 
 This writes `local/outputs/like_score_report.md`. Snapshots, ranking dumps, and caches stay under gitignored `local/`. Weaviate, store UI, and automatic outreach remain out of scope.
+
+
+## Generic text similarity
+
+`pretty-reco-ml` is also the shared vector service for non-image similarity workloads. The first consumer is Pretty WATI support memory.
+
+- Model: `intfloat/multilingual-e5-small` by default (override with `TEXT_EMBEDDING_MODEL`).
+- The service owns text encoding and cosine ranking.
+- The caller owns persistence, namespaces/datasets, authorization semantics, and business logic.
+- This service does not read or write MySQL for support memory.
+
+`POST /embeddings/text` accepts up to 64 texts and returns normalized vectors.
+
+`POST /similarity/text` accepts a query text plus candidate IDs/vectors (up to 5,000) and returns Top-K IDs/scores. This keeps vector operations centralized here while `pretty-crm-api` remains the source of truth for the WATI case bank.
