@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,8 +28,13 @@ from embeddings.contract import (
     ImageMatchResponse,
     QueryEmbeddingRequest,
     QueryEmbeddingResponse,
+    TextEmbeddingsRequest,
+    TextEmbeddingsResponse,
+    TextSimilarityRequest,
+    TextSimilarityResponse,
 )
 from embeddings.query_image import QueryImageError, decode_image_base64, run_query
+from embeddings.text_similarity import TextEncoder, rank_candidates
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
 from embeddings.catalog_index import CatalogIndex, load_catalog_index
@@ -82,12 +88,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.encoder = VisionEncoder()
     logger.info("loading recommender")
     app.state.recommender = RecommenderService.load()
+    app.state.text_encoder = None
     app.state.catalog = None
     app.state.load_catalog = load_catalog_index
     yield
 
 
 app = FastAPI(title="pretty-reco-ml", lifespan=lifespan)
+_TEXT_ENCODER_LOCK = threading.Lock()
 
 
 def _catalog(request: Request) -> CatalogIndex:
@@ -111,6 +119,26 @@ def _recommender(request: Request) -> RecommenderService:
     if recommender is None:
         raise HTTPException(status_code=503, detail="recommender is not loaded")
     return recommender
+
+
+def _text_encoder(
+    request: Request,
+    _: None = Depends(require_api_key),
+) -> TextEncoder:
+    encoder: TextEncoder | None = getattr(request.app.state, "text_encoder", None)
+    if encoder is not None:
+        return encoder
+    with _TEXT_ENCODER_LOCK:
+        encoder = getattr(request.app.state, "text_encoder", None)
+        if encoder is not None:
+            return encoder
+        try:
+            encoder = TextEncoder()
+        except Exception:
+            logger.exception("text encoder load failure")
+            raise HTTPException(status_code=503, detail="text encoder is not loaded") from None
+        request.app.state.text_encoder = encoder
+        return encoder
 
 
 @app.exception_handler(RequestValidationError)
@@ -246,3 +274,53 @@ def match_image_decide(
     except Exception:
         logger.exception("image match decide failure")
         raise HTTPException(status_code=500, detail="encoder/service-level failure") from None
+
+
+@app.post("/embeddings/text", response_model=TextEmbeddingsResponse)
+def embeddings_text(
+    payload: TextEmbeddingsRequest,
+    encoder: TextEncoder = Depends(_text_encoder),
+) -> TextEmbeddingsResponse:
+    try:
+        vectors = encoder.encode(payload.texts, prefix="passage")
+        return TextEmbeddingsResponse(
+            embedding_model=encoder.model_name,
+            embedding_dimension=int(vectors.shape[1]),
+            results=[
+                {"index": index, "embedding": vector.tolist()}
+                for index, vector in enumerate(vectors)
+            ],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("text embedding failure")
+        raise HTTPException(status_code=500, detail="text encoder/service-level failure") from None
+
+
+@app.post("/similarity/text", response_model=TextSimilarityResponse)
+def similarity_text(
+    payload: TextSimilarityRequest,
+    encoder: TextEncoder = Depends(_text_encoder),
+) -> TextSimilarityResponse:
+    try:
+        query_vector = encoder.encode([payload.query_text], prefix="query")[0].tolist()
+        ranked = rank_candidates(
+            query_vector,
+            [candidate.model_dump() for candidate in payload.candidates],
+            payload.top,
+        )
+        return TextSimilarityResponse(
+            embedding_model=encoder.model_name,
+            embedding_dimension=len(query_vector),
+            results=ranked,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("text similarity failure")
+        raise HTTPException(status_code=500, detail="text encoder/service-level failure") from None

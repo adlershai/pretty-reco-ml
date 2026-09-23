@@ -134,3 +134,40 @@ class ImageMatchDecideResponse(BaseModel):
     reason: str
     verification: list[dict[str, Any]]
     candidates: list[ImageMatchCandidate]
+
+
+class TextEmbeddingsRequest(BaseModel):
+    texts: list[str] = Field(min_length=1, max_length=64)
+
+
+class TextEmbeddingItem(BaseModel):
+    index: int
+    embedding: list[float]
+
+
+class TextEmbeddingsResponse(BaseModel):
+    embedding_model: str
+    embedding_dimension: int
+    results: list[TextEmbeddingItem]
+
+
+class TextSimilarityCandidate(BaseModel):
+    id: str
+    embedding: list[float] = Field(min_length=1)
+
+
+class TextSimilarityRequest(BaseModel):
+    query_text: str = Field(min_length=1)
+    candidates: list[TextSimilarityCandidate] = Field(min_length=1, max_length=5000)
+    top: int = Field(default=5, ge=1, le=100)
+
+
+class TextSimilarityResult(BaseModel):
+    id: str
+    score: float
+
+
+class TextSimilarityResponse(BaseModel):
+    embedding_model: str
+    embedding_dimension: int
+    results: list[TextSimilarityResult]

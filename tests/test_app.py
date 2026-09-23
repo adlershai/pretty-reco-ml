@@ -20,6 +20,24 @@ VALID_RESULT = {
 }
 
 
+class DummyTextEncoder:
+    model_name = "dummy-text"
+    embedding_dimension = 3
+    last_prefix = "passage"
+
+    def encode(self, texts: list[str], *, prefix: str = "passage") -> Any:
+        import numpy as np
+
+        DummyTextEncoder.last_prefix = prefix
+        rows = []
+        for text in texts:
+            if "order" in text.lower() or "הזמנה" in text:
+                rows.append([1.0, 0.0, 0.0])
+            else:
+                rows.append([0.0, 1.0, 0.0])
+        return np.asarray(rows, dtype=np.float32)
+
+
 class DummyEncoder:
     embedding_model = "dummy"
     embedding_dimension = 768
@@ -42,6 +60,7 @@ class DummyEncoder:
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("RECO_API_KEY", "test-key")
     monkeypatch.setattr(app_module, "VisionEncoder", DummyEncoder)
+    monkeypatch.setattr(app_module, "TextEncoder", DummyTextEncoder)
 
     class _StubRecommender:
         model_version = "the_pretty_model_v1"
@@ -323,3 +342,57 @@ def test_match_image_decide_unique_same_is_match(client: TestClient) -> None:
 def test_match_image_decide_rejects_missing_key(client: TestClient) -> None:
     response = client.post("/match/image/decide", json={"candidates": [], "openai_output": {}})
     assert response.status_code == 401
+
+
+def test_text_embeddings_returns_vectors(client: TestClient) -> None:
+    response = client.post(
+        "/embeddings/text",
+        json={"texts": ["order stuck", "store hours"]},
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["embedding_model"] == "dummy-text"
+    assert body["embedding_dimension"] == 3
+    assert body["results"][0]["embedding"] == [1.0, 0.0, 0.0]
+    assert body["results"][1]["embedding"] == [0.0, 1.0, 0.0]
+    assert DummyTextEncoder.last_prefix == "passage"
+
+
+def test_text_embeddings_rejects_missing_key(client: TestClient) -> None:
+    response = client.post("/embeddings/text", json={"texts": ["order stuck"]})
+    assert response.status_code == 401
+
+
+def test_text_similarity_returns_ranked_ids(client: TestClient) -> None:
+    response = client.post(
+        "/similarity/text",
+        json={
+            "query_text": "order stuck",
+            "top": 2,
+            "candidates": [
+                {"id": "store", "embedding": [0.0, 1.0, 0.0]},
+                {"id": "order", "embedding": [1.0, 0.0, 0.0]},
+                {"id": "mixed", "embedding": [0.7, 0.7, 0.0]},
+            ],
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["id"] for row in body["results"]] == ["order", "mixed"]
+    assert body["results"][0]["score"] > body["results"][1]["score"]
+    assert DummyTextEncoder.last_prefix == "query"
+
+
+def test_text_similarity_rejects_dimension_mismatch(client: TestClient) -> None:
+    response = client.post(
+        "/similarity/text",
+        json={
+            "query_text": "order stuck",
+            "candidates": [{"id": "bad", "embedding": [1.0, 0.0]}],
+        },
+        headers={"X-API-Key": "test-key"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "VECTOR_DIMENSION_MISMATCH"
