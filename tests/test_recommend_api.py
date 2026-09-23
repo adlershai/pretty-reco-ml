@@ -19,6 +19,7 @@ from inference.recommender import (
 )
 from inference.ranking import rank_customers_for_model
 from inference.sanity import check_vectors
+from embeddings.text_similarity import DEFAULT_TEXT_MODEL
 
 
 class DummyEncoder:
@@ -63,7 +64,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 def test_health_includes_model_metadata(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "model": MODEL_VERSION, "dimension": 64}
+    assert response.json() == {
+        "status": "ok",
+        "text_embedding_model": DEFAULT_TEXT_MODEL,
+        "model": MODEL_VERSION,
+        "dimension": 64,
+    }
 
 
 def test_recommend_default_limit_is_100(client: TestClient) -> None:
