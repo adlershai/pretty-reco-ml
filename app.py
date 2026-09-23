@@ -34,7 +34,7 @@ from embeddings.contract import (
     TextSimilarityResponse,
 )
 from embeddings.query_image import QueryImageError, decode_image_base64, run_query
-from embeddings.text_similarity import TextEncoder, rank_candidates
+from embeddings.text_similarity import DEFAULT_TEXT_MODEL, TextEncoder, rank_candidates
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
 from embeddings.catalog_index import CatalogIndex, load_catalog_index
@@ -149,7 +149,10 @@ async def invalid_payload(_request: Request, _exc: RequestValidationError) -> JS
 @app.get("/health")
 def health(request: Request) -> dict[str, Any]:
     recommender: RecommenderService | None = getattr(request.app.state, "recommender", None)
-    payload: dict[str, Any] = {"status": "ok"}
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "text_embedding_model": DEFAULT_TEXT_MODEL,
+    }
     if recommender is not None:
         payload["model"] = MODEL_VERSION
         payload["dimension"] = recommender.dimension

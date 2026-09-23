@@ -164,6 +164,7 @@ class TextSimilarityRequest(BaseModel):
 
 class TextSimilarityResult(BaseModel):
     id: str
+    rank: int = Field(ge=1)
     score: float
 
 
