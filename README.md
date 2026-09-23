@@ -269,9 +269,12 @@ This writes `local/outputs/like_score_report.md`. Snapshots, ranking dumps, and 
 
 - Model: `intfloat/multilingual-e5-small` by default (override with `TEXT_EMBEDDING_MODEL`).
 - The service owns text encoding and cosine ranking.
-- The caller owns persistence, namespaces/datasets, authorization semantics, and business logic.
+- The caller owns persistence, namespaces/datasets, authorization semantics, business logic, ticket ownership, authority and action selection.
 - This service does not read or write MySQL for support memory.
+- For Pretty 2.0, this repository is a representation/similarity service only. It never decides what customer-service action Pretty should take.
 
 `POST /embeddings/text` accepts up to 64 texts and returns normalized **passage** vectors.
 
 `POST /similarity/text` encodes `query_text` with the E5 **query** prefix, then ranks caller-supplied candidate vectors (up to 5,000) by cosine Top-K. Store those candidates with `/embeddings/text` so query and passage stay in the matching E5 spaces.
+
+For stable Pretty 2.0 telemetry, every candidate must have a non-empty unique `id`. Results contain explicit `rank` (1-based), `id`, and cosine `score`. Equal scores are ordered by candidate id so ranking is deterministic. `GET /health` exposes `text_embedding_model` without forcing the text encoder to load.
