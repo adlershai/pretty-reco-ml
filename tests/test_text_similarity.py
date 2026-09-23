@@ -30,4 +30,39 @@ def test_rank_candidates_returns_top_k() -> None:
         top=2,
     )
     assert [row["id"] for row in ranked] == ["b", "c"]
+    assert [row["rank"] for row in ranked] == [1, 2]
     assert np.isfinite(ranked[0]["score"])
+
+
+def test_rank_candidates_rejects_duplicate_ids() -> None:
+    with pytest.raises(ValueError, match="DUPLICATE_CANDIDATE_ID"):
+        rank_candidates(
+            [1.0, 0.0],
+            [
+                {"id": "same", "embedding": [1.0, 0.0]},
+                {"id": "same", "embedding": [0.5, 0.5]},
+            ],
+            top=2,
+        )
+
+
+def test_rank_candidates_rejects_blank_id() -> None:
+    with pytest.raises(ValueError, match="CANDIDATE_ID_REQUIRED"):
+        rank_candidates(
+            [1.0, 0.0],
+            [{"id": " ", "embedding": [1.0, 0.0]}],
+            top=1,
+        )
+
+
+def test_rank_candidates_breaks_score_ties_by_id() -> None:
+    ranked = rank_candidates(
+        [1.0, 0.0],
+        [
+            {"id": "b", "embedding": [1.0, 0.0]},
+            {"id": "a", "embedding": [1.0, 0.0]},
+        ],
+        top=2,
+    )
+    assert [row["id"] for row in ranked] == ["a", "b"]
+    assert [row["rank"] for row in ranked] == [1, 2]
