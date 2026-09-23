@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="pretty-reco-ml", lifespan=lifespan)
+_TEXT_ENCODER_LOCK = threading.Lock()
 
 
 def _catalog(request: Request) -> CatalogIndex:
@@ -119,17 +121,24 @@ def _recommender(request: Request) -> RecommenderService:
     return recommender
 
 
-def _text_encoder(request: Request) -> TextEncoder:
+def _text_encoder(
+    request: Request,
+    _: None = Depends(require_api_key),
+) -> TextEncoder:
     encoder: TextEncoder | None = getattr(request.app.state, "text_encoder", None)
     if encoder is not None:
         return encoder
-    try:
-        encoder = TextEncoder()
-    except Exception:
-        logger.exception("text encoder load failure")
-        raise HTTPException(status_code=503, detail="text encoder is not loaded") from None
-    request.app.state.text_encoder = encoder
-    return encoder
+    with _TEXT_ENCODER_LOCK:
+        encoder = getattr(request.app.state, "text_encoder", None)
+        if encoder is not None:
+            return encoder
+        try:
+            encoder = TextEncoder()
+        except Exception:
+            logger.exception("text encoder load failure")
+            raise HTTPException(status_code=503, detail="text encoder is not loaded") from None
+        request.app.state.text_encoder = encoder
+        return encoder
 
 
 @app.exception_handler(RequestValidationError)
@@ -271,10 +280,9 @@ def match_image_decide(
 def embeddings_text(
     payload: TextEmbeddingsRequest,
     encoder: TextEncoder = Depends(_text_encoder),
-    _: None = Depends(require_api_key),
 ) -> TextEmbeddingsResponse:
     try:
-        vectors = encoder.encode(payload.texts)
+        vectors = encoder.encode(payload.texts, prefix="passage")
         return TextEmbeddingsResponse(
             embedding_model=encoder.model_name,
             embedding_dimension=int(vectors.shape[1]),
@@ -296,10 +304,9 @@ def embeddings_text(
 def similarity_text(
     payload: TextSimilarityRequest,
     encoder: TextEncoder = Depends(_text_encoder),
-    _: None = Depends(require_api_key),
 ) -> TextSimilarityResponse:
     try:
-        query_vector = encoder.encode([payload.query_text])[0].tolist()
+        query_vector = encoder.encode([payload.query_text], prefix="query")[0].tolist()
         ranked = rank_candidates(
             query_vector,
             [candidate.model_dump() for candidate in payload.candidates],

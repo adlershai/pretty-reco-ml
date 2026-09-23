@@ -23,10 +23,12 @@ VALID_RESULT = {
 class DummyTextEncoder:
     model_name = "dummy-text"
     embedding_dimension = 3
+    last_prefix = "passage"
 
-    def encode(self, texts: list[str]) -> Any:
+    def encode(self, texts: list[str], *, prefix: str = "passage") -> Any:
         import numpy as np
 
+        DummyTextEncoder.last_prefix = prefix
         rows = []
         for text in texts:
             if "order" in text.lower() or "הזמנה" in text:
@@ -354,6 +356,12 @@ def test_text_embeddings_returns_vectors(client: TestClient) -> None:
     assert body["embedding_dimension"] == 3
     assert body["results"][0]["embedding"] == [1.0, 0.0, 0.0]
     assert body["results"][1]["embedding"] == [0.0, 1.0, 0.0]
+    assert DummyTextEncoder.last_prefix == "passage"
+
+
+def test_text_embeddings_rejects_missing_key(client: TestClient) -> None:
+    response = client.post("/embeddings/text", json={"texts": ["order stuck"]})
+    assert response.status_code == 401
 
 
 def test_text_similarity_returns_ranked_ids(client: TestClient) -> None:
@@ -374,6 +382,7 @@ def test_text_similarity_returns_ranked_ids(client: TestClient) -> None:
     body = response.json()
     assert [row["id"] for row in body["results"]] == ["order", "mixed"]
     assert body["results"][0]["score"] > body["results"][1]["score"]
+    assert DummyTextEncoder.last_prefix == "query"
 
 
 def test_text_similarity_rejects_dimension_mismatch(client: TestClient) -> None:

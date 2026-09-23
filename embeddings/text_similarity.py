@@ -38,14 +38,15 @@ class TextEncoder:
         denom = attention_mask.sum(dim=1)[..., None].clamp(min=1)
         return masked.sum(dim=1) / denom
 
-    def encode(self, texts: list[str]) -> np.ndarray:
+    def encode(self, texts: list[str], *, prefix: str = "passage") -> np.ndarray:
         clean = [str(text or "").strip() for text in texts]
         if not clean or any(not text for text in clean):
             raise ValueError("TEXT_REQUIRED")
+        if prefix not in {"passage", "query"}:
+            raise ValueError("INVALID_TEXT_PREFIX")
 
-        # E5 is trained with query/passage prefixes. "passage" is stable for stored
-        # memory text; similarity queries use the same space and remain comparable.
-        prepared = [f"passage: {text}" for text in clean]
+        # E5: stored documents use passage:, search strings use query:.
+        prepared = [f"{prefix}: {text}" for text in clean]
         batch = self.tokenizer(
             prepared,
             max_length=512,

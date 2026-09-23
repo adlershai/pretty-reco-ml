@@ -272,6 +272,6 @@ This writes `local/outputs/like_score_report.md`. Snapshots, ranking dumps, and 
 - The caller owns persistence, namespaces/datasets, authorization semantics, and business logic.
 - This service does not read or write MySQL for support memory.
 
-`POST /embeddings/text` accepts up to 64 texts and returns normalized vectors.
+`POST /embeddings/text` accepts up to 64 texts and returns normalized **passage** vectors.
 
-`POST /similarity/text` accepts a query text plus candidate IDs/vectors (up to 5,000) and returns Top-K IDs/scores. This keeps vector operations centralized here while `pretty-crm-api` remains the source of truth for the WATI case bank.
+`POST /similarity/text` encodes `query_text` with the E5 **query** prefix, then ranks caller-supplied candidate vectors (up to 5,000) by cosine Top-K. Store those candidates with `/embeddings/text` so query and passage stay in the matching E5 spaces.
