@@ -82,16 +82,34 @@ def rank_candidates(
     top: int,
 ) -> list[dict[str, Any]]:
     ranked: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
     for candidate in candidates:
+        candidate_id = str(candidate.get("id", "")).strip()
+        if not candidate_id:
+            raise ValueError("CANDIDATE_ID_REQUIRED")
+        if candidate_id in seen_ids:
+            raise ValueError("DUPLICATE_CANDIDATE_ID")
+        seen_ids.add(candidate_id)
+
         vector = candidate.get("embedding")
         if not isinstance(vector, list):
             raise ValueError("CANDIDATE_EMBEDDING_REQUIRED")
+
         ranked.append(
             {
-                "id": str(candidate.get("id", "")),
+                "id": candidate_id,
                 "score": cosine_similarity(query_embedding, vector),
             }
         )
 
-    ranked.sort(key=lambda item: item["score"], reverse=True)
-    return ranked[:top]
+    ranked.sort(key=lambda item: (-item["score"], item["id"]))
+    selected = ranked[:top]
+    return [
+        {
+            "id": item["id"],
+            "rank": index,
+            "score": item["score"],
+        }
+        for index, item in enumerate(selected, start=1)
+    ]
