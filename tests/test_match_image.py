@@ -258,3 +258,40 @@ def test_match_image_catalog_evidence_beats_order_scene() -> None:
     assert result.match is not None
     assert result.match.model == "53235_007"
     assert result.order is None
+
+
+def test_match_image_order_document_beats_identifiable_shoe() -> None:
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="50724_001",
+                image_type="main",
+                embedding=_unit([0.0, 1.0, 0.0]),
+                model_id=6,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(
+        image,
+        FakeEncoder(),
+        catalog,
+        top=10,
+        ocr_fn=lambda _img: "אישור הזמנה CS2247177794\nהזמנתך התקבלה בהצלחה\nמספר הזמנה CS2247177794",
+        extract_order_fn=lambda _img: {
+            "order_number": "CS2247177794",
+            "model": "50724_001",
+            "size": "40.0",
+        },
+    )
+    assert result.image_kind == "order"
+    assert result.match is None
+    assert result.candidates == []
+    assert result.order is not None
+    assert result.order["order_number"] == "CS2247177794"
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "order"
+    assert payload["verifier"] is None
+    assert payload["candidates"] == []

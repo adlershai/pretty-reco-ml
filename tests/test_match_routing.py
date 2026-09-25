@@ -85,6 +85,22 @@ def test_1057_on_the_way_is_delivery_notice(encoder, catalog) -> None:
 
 
 @pytest.mark.live
+def test_1162_order_confirmation_is_order_not_shoe(encoder, catalog) -> None:
+    path = FIXTURES / "wati_1162.jpg"
+    if not path.is_file():
+        pytest.skip("wati_1162.jpg fixture is missing")
+    image = Image.open(path).convert("RGB")
+    result = match_image(image, encoder, catalog, top=10)
+    assert result.image_kind == "order", (
+        f"1162 routed {result.image_kind} scores={result.scores} order={result.order}"
+    )
+    assert result.match is None
+    assert result.candidates == []
+    assert result.order is not None
+    assert result.order["order_number"] == "CS2247177794"
+
+
+@pytest.mark.live
 def test_736_clothing_ad_still_garbage(encoder, catalog) -> None:
     with requests.Session() as session:
         image = decode_image(download_image_bytes(EVENT_736_URL, session))
@@ -102,6 +118,7 @@ def test_routing_confusion_matrix(encoder, catalog) -> None:
         ("1068", "shoe", SHOE_FIXTURES[2][1]),
         ("1071", "shoe", SHOE_FIXTURES[3][1]),
         ("753", "order", FIXTURES / "order_87610.jpg"),
+        ("1162", "order", FIXTURES / "wati_1162.jpg"),
         ("1057", "delivery_notice", FIXTURES / "wati_1057.jpg"),
     ]
     with requests.Session() as session:
@@ -127,6 +144,7 @@ def test_routing_confusion_matrix(encoder, catalog) -> None:
         "1068": "shoe",
         "1071": "shoe",
         "753": "order",
+        "1162": "order",
         "1057": "delivery_notice",
         "736": "garbage",
     }

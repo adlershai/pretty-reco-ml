@@ -13,7 +13,11 @@ from embeddings.delivery_extract import (
     delivery_payload,
     extract_delivery as default_extract_delivery,
 )
-from embeddings.document_kind import classify_document_kind
+from embeddings.document_kind import (
+    classify_document_kind,
+    has_strong_delivery_evidence,
+    has_strong_order_evidence,
+)
 from embeddings.isolate import MIN_PANEL_AREA, CropBox, crop_image, isolation_applied, propose_crops
 from embeddings.order_extract import (
     extract_order as default_extract_order,
@@ -136,6 +140,31 @@ def _non_shoe_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dic
     return scene, scores
 
 
+def _document_result(
+    *,
+    boxes: list[CropBox],
+    crop_scores: list[tuple[CropBox, float]],
+    scores: dict[str, float],
+    embedding_model: str,
+    image_kind: str,
+    order: dict[str, str | None] | None = None,
+    delivery: dict[str, str | None] | None = None,
+) -> ImageMatchResult:
+    return ImageMatchResult(
+        match=None,
+        candidates=[],
+        crop=boxes[0],
+        shoe_isolated=False,
+        relevance=RELEVANCE_IRRELEVANT,
+        scores=scores,
+        embedding_model=embedding_model,
+        crop_scores=crop_scores,
+        image_kind=image_kind,
+        order=order,
+        delivery=delivery,
+    )
+
+
 def match_image(
     image: Image.Image,
     encoder: VisionEncoder,
@@ -144,12 +173,25 @@ def match_image(
     top: int = DEFAULT_TOP,
     extract_order_fn: Any = None,
     extract_delivery_fn: Any = None,
+    ocr_fn: Any = None,
 ) -> ImageMatchResult:
-    """Shoe first; order only after shoe detection fails. Then garbage."""
+    """Whole-image document intent first; shoe only if the frame is not an order/delivery."""
     rgb = image.convert("RGB")
+    text_fn = ocr_fn if ocr_fn is not None else ocr_image_text
+    text = text_fn(rgb)
+    if extract_order_fn:
+        order_fields = extract_order_fn(rgb)
+    else:
+        order_fields = default_extract_order(rgb, text=text)
+    if extract_delivery_fn:
+        delivery_fields = extract_delivery_fn(rgb)
+    else:
+        delivery_fields = default_extract_delivery(rgb, text=text)
+
     boxes = propose_crops(rgb)
     crops = [crop_image(rgb, box) for box in boxes]
     vectors = encoder.encode_batch(crops)
+    scene, scene_scores = _non_shoe_kind(encoder, vectors[0])
 
     best_index: int | None = None
     best_score = float("-inf")
@@ -165,6 +207,26 @@ def match_image(
             best_index = index
             best_score = catalog_score
             gate_scores = {**scores, "catalog": catalog_score}
+
+    if has_strong_order_evidence(text, order_fields):
+        return _document_result(
+            boxes=boxes,
+            crop_scores=crop_scores,
+            scores=scene_scores,
+            embedding_model=encoder.embedding_model,
+            image_kind=IMAGE_KIND_ORDER,
+            order=order_payload(order_fields),
+        )
+
+    if has_strong_delivery_evidence(text, delivery_fields):
+        return _document_result(
+            boxes=boxes,
+            crop_scores=crop_scores,
+            scores=scene_scores,
+            embedding_model=encoder.embedding_model,
+            image_kind=IMAGE_KIND_DELIVERY,
+            delivery=delivery_payload(delivery_fields),
+        )
 
     if best_index is not None:
         chosen = boxes[best_index]
@@ -185,45 +247,25 @@ def match_image(
             delivery=None,
         )
 
-    scene, scene_scores = _non_shoe_kind(encoder, vectors[0])
-    text = ocr_image_text(rgb)
     kind = classify_document_kind(text) or scene
     if kind == IMAGE_KIND_ORDER:
-        if extract_order_fn:
-            fields = extract_order_fn(rgb)
-        else:
-            fields = default_extract_order(rgb, text=text)
-        return ImageMatchResult(
-            match=None,
-            candidates=[],
-            crop=boxes[0],
-            shoe_isolated=False,
-            relevance=RELEVANCE_IRRELEVANT,
+        return _document_result(
+            boxes=boxes,
+            crop_scores=crop_scores,
             scores=scene_scores,
             embedding_model=encoder.embedding_model,
-            crop_scores=crop_scores,
             image_kind=IMAGE_KIND_ORDER,
-            order=order_payload(fields),
-            delivery=None,
+            order=order_payload(order_fields),
         )
 
     if kind == IMAGE_KIND_DELIVERY:
-        if extract_delivery_fn:
-            fields = extract_delivery_fn(rgb)
-        else:
-            fields = default_extract_delivery(rgb, text=text)
-        return ImageMatchResult(
-            match=None,
-            candidates=[],
-            crop=boxes[0],
-            shoe_isolated=False,
-            relevance=RELEVANCE_IRRELEVANT,
+        return _document_result(
+            boxes=boxes,
+            crop_scores=crop_scores,
             scores=scene_scores,
             embedding_model=encoder.embedding_model,
-            crop_scores=crop_scores,
             image_kind=IMAGE_KIND_DELIVERY,
-            order=None,
-            delivery=delivery_payload(fields),
+            delivery=delivery_payload(delivery_fields),
         )
 
     chosen = boxes[0]

@@ -12,10 +12,12 @@ from typing import Any
 from PIL import Image
 
 ORDER_NUMBER_RE = re.compile(
-    r'(?:new\s*order|order\s*number|מספר\s*הזמנה|הזמנה)\s*[:#\s]*([A-Z]{0,3}\d{5,12})\b',
+    r'(?:new\s*order|order\s*(?:number|confirmation)|אישור\s*הזמנה|מספר\s*הזמנה|הזמנה)'
+    r'\s*[:#\s]*([A-Z]{0,3}\d{5,12})\b',
     re.IGNORECASE,
 )
 HASH_ORDER_RE = re.compile(r'#(\d{5,6})\b')
+CS_ORDER_RE = re.compile(r'\b(CS\d{8,12})\b', re.IGNORECASE)
 MODEL_RE = re.compile(r'(?<!\d)(\d{5}_\d{3})(?:\d{2,3})?(?!\d)')
 SIZE_RE = re.compile(
     r'(?:[-–]|size|מידה)\s*(3[5-9](?:\.[05])?|4[0-2](?:\.[05])?)',
@@ -33,6 +35,10 @@ def parse_order_fields(text: str) -> dict[str, str | None]:
         hashed = HASH_ORDER_RE.search(raw)
         if hashed:
             order_number = hashed.group(1)
+        else:
+            cs_order = CS_ORDER_RE.search(raw)
+            if cs_order:
+                order_number = cs_order.group(1).upper()
 
     model = None
     modeled = MODEL_RE.search(raw)
@@ -51,6 +57,19 @@ def parse_order_fields(text: str) -> dict[str, str | None]:
     }
 
 
+def _tesseract_lang(binary: str) -> str:
+    listed = subprocess.run(
+        [binary, '--list-langs'],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    langs = str(listed.stdout or '').lower()
+    if 'heb' in langs:
+        return 'heb+eng'
+    return 'eng'
+
+
 def ocr_image_text(image: Image.Image) -> str:
     """Best-effort Tesseract OCR. Empty when tesseract is not installed."""
     binary = shutil.which('tesseract')
@@ -62,11 +81,18 @@ def ocr_image_text(image: Image.Image) -> str:
     try:
         rgb.save(path, format='PNG')
         completed = subprocess.run(
-            [binary, path, 'stdout', '--psm', '6'],
+            [binary, path, 'stdout', '-l', _tesseract_lang(binary), '--psm', '6'],
             check=False,
             capture_output=True,
             text=True,
         )
+        if completed.returncode != 0:
+            completed = subprocess.run(
+                [binary, path, 'stdout', '--psm', '6'],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
     finally:
         try:
             os.remove(path)

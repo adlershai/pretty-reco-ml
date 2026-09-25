@@ -27,7 +27,7 @@ CONFIRMED: dict[int, str] = {
 }
 
 NOT_SHOES: set[int] = {736}
-ORDER_SCREENSHOTS: set[int] = {753}
+ORDER_SCREENSHOTS: set[int] = {753, 1162}
 DELIVERY_NOTICES: set[int] = {1057}
 UNCERTAIN_LABELS: set[int] = {865}
 UNLABELED: set[int] = {869, 880, 611, 589, 568, 559}

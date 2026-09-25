@@ -62,15 +62,18 @@ uv pip install -p .venv/bin/python torch==2.13.0 --index-url https://download.py
     Write-Host '==> pip install skipped'
 }
 
-Write-Host '==> tesseract (order screenshot OCR)'
+Write-Host '==> tesseract (order screenshot OCR, Hebrew + English)'
 $tessCmd = @'
-if command -v tesseract >/dev/null 2>&1; then
-  tesseract --version | head -1
-else
+if ! command -v tesseract >/dev/null 2>&1; then
   sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tesseract-ocr
-  tesseract --version | head -1
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tesseract-ocr tesseract-ocr-heb
+elif ! tesseract --list-langs 2>/dev/null | grep -q '^heb$'; then
+  sudo apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tesseract-ocr-heb
 fi
+tesseract --version | head -1
+tesseract --list-langs 2>/dev/null | tr '\n' ' '
+echo
 '@
 Write-Host (Invoke-Remote $tessCmd)
 

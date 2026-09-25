@@ -63,7 +63,7 @@ Footwear:
 
 When `relevance` is `irrelevant`, `status` is `garbage`, `order`, or `delivery_notice`, `verifier` is null, and `candidates` is empty. `image_kind` is `shoe` | `order` | `delivery_notice` | `garbage`.
 
-Non-shoe (issue #4): shoe detection runs first. Only if that fails does the router classify ORDER vs DELIVERY_NOTICE vs GARBAGE. Order and delivery never compete with a positive shoe decision.
+Whole-image document intent (issues #4 and #7): strong order/delivery evidence (order terminology plus an extractable order number, or a delivery notice with a tracking number) wins even when a product thumbnail is visually identifiable. Weak cosine similarity to an “order” prompt must not steal an ordinary shoe photo. Visual catalog identity is not the final interpretation of an order document. The order number is the authoritative key; CRM looks up products and sizes in the DB.
 
 Order:
 
@@ -102,7 +102,7 @@ Delivery notice (WATI **1057**, `tests/fixtures/wati_1057.jpg`):
 
 A tracking/order number on a shipment email must not by itself make the image an ORDER. Classify by primary purpose.
 
-Permanent fixtures: WATI **736** clothing ad → `garbage`; WATI **753** (`tests/fixtures/order_87610.jpg`, order `#87610` / Kristen 38.5 / `53698_003`) → `order`; WATI **1057** On The Way tracking → `delivery_notice`.
+Permanent fixtures: WATI **736** clothing ad → `garbage`; WATI **753** (`tests/fixtures/order_87610.jpg`, order `#87610` / Kristen 38.5 / `53698_003`) → `order`; WATI **1162** (`tests/fixtures/wati_1162.jpg`, `אישור הזמנה CS2247177794`, Judy `50724_001`) → `order` even though the product is visually identifiable; WATI **1057** On The Way tracking → `delivery_notice`.
 
 ## Decide (`POST /match/image/decide`)
 

@@ -45,3 +45,19 @@ Kristen - 40.0
     assert fields["order_number"] == "BS580427134"
     assert fields["model"] == "52797_004"
     assert fields["size"] == "40.0"
+
+
+def test_parse_hebrew_confirmation_cs2247177794() -> None:
+    text = """
+אישור הזמנה CS2247177794
+הזמנתך התקבלה בהצלחה
+מספר הזמנה CS2247177794
+Judy - 40.0
+50724_001
+Nicole - 40.5
+50321_019
+"""
+    fields = parse_order_fields(text)
+    assert fields["order_number"] == "CS2247177794"
+    assert fields["model"] == "50724_001"
+    assert fields["size"] == "40.0"
