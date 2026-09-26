@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 ORDER_NUMBER_RE = re.compile(
     r'(?:new\s*order|order\s*(?:number|confirmation)|אישור\s*הזמנה|מספר\s*הזמנה|הזמנה)'
@@ -31,9 +31,10 @@ SIZE_DECIMAL_RE = re.compile(r'(?<!\d)((?:3[5-9]|4[0-2])[.,][05])(?!\d)')
 def recover_app_order_number(text: str, captured: str | None) -> str | None:
     """Prefer a readable BS/CS token; repair OCR that turns S into 5 when the letter prefix remains."""
     raw = str(text or '')
-    exact = CS_ORDER_RE.search(raw) or BS_ORDER_RE.search(raw)
-    if exact:
-        return exact.group(1).upper()
+    tokens = [match.group(1).upper() for match in CS_ORDER_RE.finditer(raw)]
+    tokens.extend(match.group(1).upper() for match in BS_ORDER_RE.finditer(raw))
+    if tokens:
+        return max(tokens, key=len)
     fuzzy = OCR_APP_PREFIX_RE.search(raw)
     if fuzzy:
         prefix = fuzzy.group(1).upper()
@@ -103,16 +104,46 @@ def _tesseract_langs(binary: str) -> list[str]:
     return ['eng']
 
 
-def _run_tesseract(binary: str, path: str, lang: str) -> str:
-    completed = subprocess.run(
-        [binary, path, 'stdout', '-l', lang, '--psm', '6'],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+def _run_tesseract(
+    binary: str,
+    path: str,
+    lang: str,
+    psm: str = '6',
+    extra: list[str] | None = None,
+) -> str:
+    command = [binary, path, 'stdout', '-l', lang, '--psm', psm]
+    if extra:
+        command.extend(extra)
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
         return ''
     return str(completed.stdout or '')
+
+
+def _ocr_latin_title(binary: str, rgb: Image.Image) -> str:
+    """High-contrast English pass on screenshot bands that carry CS/BS ids."""
+    width, height = rgb.size
+    whitelist = ['-c', 'tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789']
+    chunks: list[str] = []
+    for top_frac, bot_frac in ((0.0, 0.22), (0.28, 0.52)):
+        box = (0, int(height * top_frac), width, max(int(height * bot_frac), int(height * top_frac) + 80))
+        band = rgb.crop(box)
+        band = ImageOps.autocontrast(band.convert('L')).convert('RGB')
+        band = band.resize((band.width * 3, band.height * 3), Image.LANCZOS)
+        handle, path = tempfile.mkstemp(suffix='.png')
+        os.close(handle)
+        try:
+            band.save(path, format='PNG')
+            for psm in ('6', '7', '11'):
+                text = _run_tesseract(binary, path, 'eng', psm, whitelist)
+                if text.strip():
+                    chunks.append(text)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return '\n'.join(chunks)
 
 
 def ocr_image_text(image: Image.Image) -> str:
@@ -135,6 +166,9 @@ def ocr_image_text(image: Image.Image) -> str:
             text = _run_tesseract(binary, path, lang)
             if text.strip():
                 chunks.append(text)
+        latin = _ocr_latin_title(binary, rgb)
+        if latin.strip():
+            chunks.insert(0, latin)
         if not chunks:
             completed = subprocess.run(
                 [binary, path, 'stdout', '--psm', '6'],

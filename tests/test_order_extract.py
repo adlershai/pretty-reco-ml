@@ -63,8 +63,8 @@ Nicole - 40.5
     assert fields["size"] == "40.0"
 
 
-def test_parse_ocr_keeps_cs_when_english_line_is_present() -> None:
-    text = "5224717794\nאישור הזמנה\nCS2247177794"
+def test_parse_ocr_keeps_longest_cs_token() -> None:
+    text = "5224717794\nCS224717794\nCS2247177794"
     fields = parse_order_fields(text)
     assert fields["order_number"] == "CS2247177794"
 
