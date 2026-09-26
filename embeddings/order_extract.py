@@ -18,11 +18,37 @@ ORDER_NUMBER_RE = re.compile(
 )
 HASH_ORDER_RE = re.compile(r'#(\d{5,6})\b')
 CS_ORDER_RE = re.compile(r'\b(CS\d{8,12})\b', re.IGNORECASE)
+BS_ORDER_RE = re.compile(r'\b(BS\d{8,12})\b', re.IGNORECASE)
+OCR_APP_PREFIX_RE = re.compile(r'\b([CB][5S]|8S)(\d{8,12})\b', re.IGNORECASE)
 MODEL_RE = re.compile(r'(?<!\d)(\d{5}_\d{3})(?:\d{2,3})?(?!\d)')
 SIZE_RE = re.compile(
-    r'(?:[-–]|size|מידה)\s*(3[5-9](?:\.[05])?|4[0-2](?:\.[05])?)',
+    r'(?:[-–—−]|size|מידה)\s*(3[5-9]|4[0-2])([.,][05])?',
     re.IGNORECASE,
 )
+SIZE_DECIMAL_RE = re.compile(r'(?<!\d)((?:3[5-9]|4[0-2])[.,][05])(?!\d)')
+
+
+def recover_app_order_number(text: str, captured: str | None) -> str | None:
+    """Prefer a readable BS/CS token; repair OCR that turns S into 5 when the letter prefix remains."""
+    raw = str(text or '')
+    exact = CS_ORDER_RE.search(raw) or BS_ORDER_RE.search(raw)
+    if exact:
+        return exact.group(1).upper()
+    fuzzy = OCR_APP_PREFIX_RE.search(raw)
+    if fuzzy:
+        prefix = fuzzy.group(1).upper()
+        digits = fuzzy.group(2)
+        if prefix in {'CS', 'C5'}:
+            return 'CS' + digits
+        return 'BS' + digits
+    cand = str(captured or '').strip().upper()
+    if re.fullmatch(r'(?:BS|CS)\d{8,12}', cand):
+        return cand
+    return captured
+
+
+def _normalize_size(value: str) -> str:
+    return str(value or '').replace(',', '.')
 
 
 def parse_order_fields(text: str) -> dict[str, str | None]:
@@ -36,9 +62,10 @@ def parse_order_fields(text: str) -> dict[str, str | None]:
         if hashed:
             order_number = hashed.group(1)
         else:
-            cs_order = CS_ORDER_RE.search(raw)
+            cs_order = CS_ORDER_RE.search(raw) or BS_ORDER_RE.search(raw)
             if cs_order:
                 order_number = cs_order.group(1).upper()
+    order_number = recover_app_order_number(raw, order_number)
 
     model = None
     modeled = MODEL_RE.search(raw)
@@ -49,6 +76,12 @@ def parse_order_fields(text: str) -> dict[str, str | None]:
     sized = SIZE_RE.search(raw)
     if sized:
         size = sized.group(1)
+        if sized.group(2):
+            size = _normalize_size(size + sized.group(2))
+    else:
+        bare = SIZE_DECIMAL_RE.search(raw)
+        if bare:
+            size = _normalize_size(bare.group(1))
 
     return {
         'order_number': order_number,
@@ -57,7 +90,7 @@ def parse_order_fields(text: str) -> dict[str, str | None]:
     }
 
 
-def _tesseract_lang(binary: str) -> str:
+def _tesseract_langs(binary: str) -> list[str]:
     listed = subprocess.run(
         [binary, '--list-langs'],
         check=False,
@@ -66,41 +99,57 @@ def _tesseract_lang(binary: str) -> str:
     )
     langs = str(listed.stdout or '').lower()
     if 'heb' in langs:
-        return 'heb+eng'
-    return 'eng'
+        return ['eng', 'heb+eng']
+    return ['eng']
+
+
+def _run_tesseract(binary: str, path: str, lang: str) -> str:
+    completed = subprocess.run(
+        [binary, path, 'stdout', '-l', lang, '--psm', '6'],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return ''
+    return str(completed.stdout or '')
 
 
 def ocr_image_text(image: Image.Image) -> str:
-    """Best-effort Tesseract OCR. Empty when tesseract is not installed."""
+    """Best-effort Tesseract OCR. Empty when tesseract is not installed.
+
+    English is run first so Latin CS/BS order numbers survive Hebrew screenshots.
+    """
     binary = shutil.which('tesseract')
     if not binary:
         return ''
     rgb = image.convert('RGB')
+    if max(rgb.size) < 1600:
+        rgb = rgb.resize((rgb.width * 2, rgb.height * 2), Image.LANCZOS)
     handle, path = tempfile.mkstemp(suffix='.png')
     os.close(handle)
+    chunks: list[str] = []
     try:
         rgb.save(path, format='PNG')
-        completed = subprocess.run(
-            [binary, path, 'stdout', '-l', _tesseract_lang(binary), '--psm', '6'],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if completed.returncode != 0:
+        for lang in _tesseract_langs(binary):
+            text = _run_tesseract(binary, path, lang)
+            if text.strip():
+                chunks.append(text)
+        if not chunks:
             completed = subprocess.run(
                 [binary, path, 'stdout', '--psm', '6'],
                 check=False,
                 capture_output=True,
                 text=True,
             )
+            if completed.returncode == 0:
+                chunks.append(str(completed.stdout or ''))
     finally:
         try:
             os.remove(path)
         except OSError:
             pass
-    if completed.returncode != 0:
-        return ''
-    return str(completed.stdout or '')
+    return '\n'.join(chunks)
 
 
 def extract_order(image: Image.Image, *, text: str | None = None) -> dict[str, str | None]:

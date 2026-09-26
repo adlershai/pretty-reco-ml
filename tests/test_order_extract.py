@@ -61,3 +61,24 @@ Nicole - 40.5
     assert fields["order_number"] == "CS2247177794"
     assert fields["model"] == "50724_001"
     assert fields["size"] == "40.0"
+
+
+def test_parse_ocr_keeps_cs_when_english_line_is_present() -> None:
+    text = "5224717794\nאישור הזמנה\nCS2247177794"
+    fields = parse_order_fields(text)
+    assert fields["order_number"] == "CS2247177794"
+
+
+def test_parse_ocr_c5_prefix_is_cs() -> None:
+    fields = parse_order_fields("מספר הזמנה C52247177794")
+    assert fields["order_number"] == "CS2247177794"
+
+
+def test_parse_numeric_web_order_is_not_prefixed_cs() -> None:
+    fields = parse_order_fields("Thank You For Your Order\nYour Order Number #87610")
+    assert fields["order_number"] == "87610"
+
+
+def test_parse_size_without_hyphen_and_comma_decimal() -> None:
+    assert parse_order_fields("Your Order Number #87610\nKristen 38.5")["size"] == "38.5"
+    assert parse_order_fields("הזמנה #87610\nמידה 38,5")["size"] == "38.5"
