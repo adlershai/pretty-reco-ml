@@ -30,10 +30,13 @@ from embeddings.contract import (
     QueryEmbeddingResponse,
     TextEmbeddingsRequest,
     TextEmbeddingsResponse,
+    PrettyMemoryQueryRequest,
+    PrettyMemoryQueryResponse,
     TextSimilarityRequest,
     TextSimilarityResponse,
 )
 from embeddings.query_image import QueryImageError, decode_image_base64, run_query
+from embeddings.pretty_memory import PrettyMemoryStore
 from embeddings.text_similarity import DEFAULT_TEXT_MODEL, TextEncoder, rank_candidates
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
@@ -89,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("loading recommender")
     app.state.recommender = RecommenderService.load()
     app.state.text_encoder = None
+    app.state.pretty_memory = None
     app.state.catalog = None
     app.state.load_catalog = load_catalog_index
     yield
@@ -139,6 +143,44 @@ def _text_encoder(
             raise HTTPException(status_code=503, detail="text encoder is not loaded") from None
         request.app.state.text_encoder = encoder
         return encoder
+
+
+def _pretty_memory(
+    request: Request,
+    encoder: TextEncoder = Depends(_text_encoder),
+) -> PrettyMemoryStore:
+    store: PrettyMemoryStore | None = getattr(request.app.state, "pretty_memory", None)
+    if store is None or store.encoder is not encoder:
+        store = PrettyMemoryStore(os.environ.get("PRETTY_MEMORY_SNAPSHOT_DIR"), encoder)
+        request.app.state.pretty_memory = store
+    return store
+
+
+def _search_pretty_memory(
+    payload: PrettyMemoryQueryRequest,
+    store: PrettyMemoryStore,
+    encoder: TextEncoder,
+    mode: str,
+) -> PrettyMemoryQueryResponse:
+    index = store.index()
+    if index is None:
+        raise HTTPException(status_code=503, detail="snapshot_not_loaded")
+    query_vector = encoder.encode([payload.query_text], prefix="query")[0]
+    results = index.search(
+        mode,  # type: ignore[arg-type]
+        query_vector,
+        role_id=payload.role_id,
+        top_k=payload.top_k,
+        exclude_wa_ids=payload.exclude_wa_ids,
+        exclude_conversation_ids=payload.exclude_conversation_ids,
+        exclude_case_keys=payload.exclude_case_keys,
+        exclude_ticket_ids=payload.exclude_ticket_ids,
+    )
+    return PrettyMemoryQueryResponse(
+        snapshot_version=index.snapshot_version,
+        embedding_model=index.embedding_model or encoder.model_name,
+        results=results,
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -327,3 +369,33 @@ def similarity_text(
     except Exception:
         logger.exception("text similarity failure")
         raise HTTPException(status_code=500, detail="text encoder/service-level failure") from None
+
+
+@app.post("/memory/recognize", response_model=PrettyMemoryQueryResponse)
+def memory_recognize(
+    payload: PrettyMemoryQueryRequest,
+    store: PrettyMemoryStore = Depends(_pretty_memory),
+    encoder: TextEncoder = Depends(_text_encoder),
+) -> PrettyMemoryQueryResponse:
+    try:
+        return _search_pretty_memory(payload, store, encoder, "recognition")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("pretty memory recognize failure")
+        raise HTTPException(status_code=500, detail="pretty memory retrieve failure") from None
+
+
+@app.post("/memory/similar", response_model=PrettyMemoryQueryResponse)
+def memory_similar(
+    payload: PrettyMemoryQueryRequest,
+    store: PrettyMemoryStore = Depends(_pretty_memory),
+    encoder: TextEncoder = Depends(_text_encoder),
+) -> PrettyMemoryQueryResponse:
+    try:
+        return _search_pretty_memory(payload, store, encoder, "case")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("pretty memory similar failure")
+        raise HTTPException(status_code=500, detail="pretty memory retrieve failure") from None

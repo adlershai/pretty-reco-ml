@@ -172,3 +172,38 @@ class TextSimilarityResponse(BaseModel):
     embedding_model: str
     embedding_dimension: int
     results: list[TextSimilarityResult]
+
+
+class PrettyMemoryQueryRequest(BaseModel):
+    query_text: str = Field(min_length=1)
+    role_id: str = "customer_success"
+    top_k: int = Field(default=5, ge=1, le=50)
+    exclude_wa_ids: list[str] = Field(default_factory=list)
+    exclude_conversation_ids: list[str] = Field(default_factory=list)
+    exclude_case_keys: list[str] = Field(default_factory=list)
+    exclude_ticket_ids: list[str] = Field(default_factory=list)
+
+
+class PrettyMemoryHit(BaseModel):
+    case_key: str
+    ticket_id: str = ""
+    rank: int
+    score: float
+    review_status: str = "unreviewed"
+    case_type: str = ""
+    case_summary: str = ""
+    handling_summary: str = ""
+    outcome_summary: str = ""
+    learning_summary: str = ""
+    manager_feedback: str = ""
+    recognition_text: str = ""
+    case_text: str = ""
+    representation: str
+
+
+class PrettyMemoryQueryResponse(BaseModel):
+    ok: bool = True
+    snapshot_loaded: bool = True
+    snapshot_version: str = ""
+    embedding_model: str = ""
+    results: list[PrettyMemoryHit]
