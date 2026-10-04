@@ -53,7 +53,7 @@ def write_snapshot(directory: Path) -> None:
                 "conversation_id": "c-hours",
                 "wa_id": "972500000088",
                 "role_id": "customer_success",
-                "review_status": "corrected",
+                "review_status": "approved",
                 "case_type": "static_info",
                 "recognition_text": "store opening hours question",
                 "case_text": "mamilla opening hours from approved maps",
@@ -66,7 +66,7 @@ def write_snapshot(directory: Path) -> None:
                 "conversation_id": "c-live",
                 "wa_id": "972500000001",
                 "role_id": "customer_success",
-                "review_status": "reviewed",
+                "review_status": "draft",
                 "case_type": "order",
                 "recognition_text": "order status follow-up from this customer",
                 "case_text": "same customer previous return",
@@ -119,8 +119,38 @@ def memory_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     app_module.app.state.text_encoder = None
 
 
-def test_review_weight_prefers_corrected() -> None:
-    assert review_weight("corrected") > review_weight("unreviewed")
+def test_approved_crm_status_ranks_above_unreviewed() -> None:
+    encoder = MemoryEncoder()
+    index = build_index(
+        {
+            "published_at": "v1",
+            "cases": [
+                {
+                    "case_key": "wati:plain",
+                    "role_id": "customer_success",
+                    "review_status": "unreviewed",
+                    "recognition_text": "store opening hours question",
+                    "case_text": "mamilla opening hours from approved maps",
+                    "case_summary": "hours",
+                },
+                {
+                    "case_key": "wati:approved",
+                    "role_id": "customer_success",
+                    "review_status": "approved",
+                    "recognition_text": "store opening hours question",
+                    "case_text": "mamilla opening hours from approved maps",
+                    "case_summary": "hours",
+                },
+            ],
+        },
+        encoder,
+    )
+    query = encoder.encode(["mamilla opening hours from approved maps"], prefix="query")[0]
+    results = index.search("case", query, top_k=2)
+    assert results[0]["case_key"] == "wati:approved"
+    assert results[0]["review_status"] == "approved"
+    assert review_weight("approved") > review_weight("draft")
+    assert review_weight("draft") > review_weight("unreviewed")
 
 
 def test_recognize_returns_matching_case(memory_client: TestClient) -> None:
@@ -152,37 +182,6 @@ def test_similar_excludes_same_customer(memory_client: TestClient) -> None:
     keys = [row["case_key"] for row in response.json()["results"]]
     assert "wati:same-customer" not in keys
     assert "wati:return-1" in keys
-
-
-def test_corrected_case_ranks_above_unreviewed() -> None:
-    encoder = MemoryEncoder()
-    index = build_index(
-        {
-            "published_at": "v1",
-            "cases": [
-                {
-                    "case_key": "wati:plain",
-                    "role_id": "customer_success",
-                    "review_status": "unreviewed",
-                    "recognition_text": "store opening hours question",
-                    "case_text": "mamilla opening hours from approved maps",
-                    "case_summary": "hours",
-                },
-                {
-                    "case_key": "wati:fixed",
-                    "role_id": "customer_success",
-                    "review_status": "corrected",
-                    "recognition_text": "store opening hours question",
-                    "case_text": "mamilla opening hours from approved maps",
-                    "case_summary": "hours",
-                },
-            ],
-        },
-        encoder,
-    )
-    query = encoder.encode(["mamilla opening hours from approved maps"], prefix="query")[0]
-    results = index.search("case", query, top_k=2)
-    assert results[0]["case_key"] == "wati:fixed"
 
 
 def test_reload_replaces_stale_index(tmp_path: Path) -> None:

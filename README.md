@@ -112,7 +112,13 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | `POST /memory/recognize` | header `X-API-Key` | Pretty recognition memory from the CRM snapshot (`current.json`) |
 | `POST /memory/similar` | header `X-API-Key` | Pretty case/handling memory from the CRM snapshot |
 
-Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key. Pretty memory reads `PRETTY_MEMORY_SNAPSHOT_DIR/current.json` (default `/home/ubuntu/pretty-memory`). Missing snapshot → 503 `snapshot_not_loaded`. The live index is swapped only after a full rebuild.
+Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key. Pretty memory reads `PRETTY_MEMORY_SNAPSHOT_DIR/current.json` (default `/home/ubuntu/pretty-memory`). Missing snapshot → 503 `snapshot_not_loaded`. The live index reloads from `current.json` on the next query after the file changes. CRM `review_status` values are `unreviewed`, `draft`, and `approved`; approved ranks above unreviewed. Retrieval eval is separate from pytest:
+
+```bash
+python -m evaluation.pretty_memory_eval
+```
+
+It reports `hit@1`, `hit@3`, `recall@5`, and queries per mode (`recognition` vs `case`) from `evaluation/pretty_memory_fixture.json`.
 
 Catalog visual matching uses per-view 768-d SigLIP vectors (`main` / `pers` / `side` stay separate; model score is the best view). Tall screenshots are cropped to pale product panels before encoding. Audit/refresh stale CDN hashes:
 
@@ -121,6 +127,7 @@ python -m embeddings.catalog_integrity --audit --models 52160_001,52792_006
 python -m embeddings.catalog_integrity --refresh-stale --models 52160_001
 python -m evaluation.match_benchmark
 python -m evaluation.verifier_eval
+python -m evaluation.pretty_memory_eval
 ```
 
 ```bash

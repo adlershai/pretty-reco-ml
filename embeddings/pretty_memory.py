@@ -21,8 +21,7 @@ logger = logging.getLogger("pretty-reco-ml.pretty_memory")
 SNAPSHOT_FILENAME = "current.json"
 DEFAULT_SNAPSHOT_DIR = "/home/ubuntu/pretty-memory"
 REVIEW_WEIGHT = {
-    "corrected": 1.15,
-    "reviewed": 1.10,
+    "approved": 1.10,
     "draft": 1.02,
     "unreviewed": 1.0,
 }
