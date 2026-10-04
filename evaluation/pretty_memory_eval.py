@@ -1,9 +1,14 @@
 """Pretty memory retrieval evaluation.
 
-Separate from unit tests. Reports hit@1, hit@3, recall@5, and queries per mode.
+Separate from unit tests. Uses the same production TextEncoder and
+PrettyMemoryIndex path as POST /memory/recognize and POST /memory/similar.
+
+Reports hit@1, hit@3, recall@5, and queries per mode.
 
 Recognition queries: early customer wording → expected case keys.
 Case/handling queries: understanding of the situation → expected case keys.
+
+This is a reproducible baseline of real retrieval, not a guaranteed-pass test.
 
 Usage (from pretty-reco-ml repo root, venv active):
 
@@ -20,30 +25,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from embeddings.pretty_memory import PrettyMemoryIndex, build_index
+from embeddings.text_similarity import TextEncoder
 
 DEFAULT_FIXTURE = Path(__file__).resolve().parent / "pretty_memory_fixture.json"
 EVAL_K = 5
-
-
-class KeywordEncoder:
-    """Deterministic stand-in so the labeled fixture can score without GPU weights."""
-
-    model_name = "pretty-memory-eval-keywords"
-
-    def encode(self, texts: list[str], *, prefix: str = "passage") -> Any:
-        rows = []
-        for text in texts:
-            lowered = text.lower()
-            if "return" in lowered or "החזר" in lowered:
-                rows.append([1.0, 0.0, 0.0])
-            elif "hours" in lowered or "שעות" in lowered:
-                rows.append([0.0, 1.0, 0.0])
-            else:
-                rows.append([0.0, 0.0, 1.0])
-        return np.asarray(rows, dtype=np.float32)
 
 
 def load_fixture(path: Path = DEFAULT_FIXTURE) -> dict[str, Any]:
@@ -110,6 +96,8 @@ def evaluate_index(
 
     return {
         "ok": True,
+        "embedding_model": str(getattr(encoder, "model_name", "") or index.embedding_model),
+        "snapshot_version": index.snapshot_version,
         "overall": summarize(rows),
         "by_mode": {mode: summarize(items) for mode, items in by_mode.items()},
         "queries": rows,
@@ -118,19 +106,9 @@ def evaluate_index(
 
 def evaluate_fixture(path: Path = DEFAULT_FIXTURE, encoder: Any | None = None) -> dict[str, Any]:
     fixture = load_fixture(path)
-    encoder = encoder or KeywordEncoder()
+    encoder = encoder or TextEncoder()
     index = index_from_cases(list(fixture.get("cases") or []), encoder)
     return evaluate_index(index, encoder, list(fixture.get("queries") or []))
-
-
-def _fixture_passed(report: dict[str, Any]) -> bool:
-    overall = report["overall"]
-    return (
-        overall["queries"] > 0
-        and overall["hit@1"] >= 1.0
-        and overall["hit@3"] >= 1.0
-        and overall["recall@5"] >= 1.0
-    )
 
 
 def main() -> int:
@@ -144,16 +122,15 @@ def main() -> int:
     )
     args = parser.parse_args()
     fixture = load_fixture(args.fixture)
-    encoder = KeywordEncoder()
+    encoder = TextEncoder()
     if args.snapshot:
         document = json.loads(args.snapshot.read_text(encoding="utf-8"))
         index = build_index(document, encoder)
-        report = evaluate_index(index, encoder, list(fixture.get("queries") or []))
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-        return 0
-    report = evaluate_index(index_from_cases(list(fixture.get("cases") or []), encoder), encoder, list(fixture.get("queries") or []))
+    else:
+        index = index_from_cases(list(fixture.get("cases") or []), encoder)
+    report = evaluate_index(index, encoder, list(fixture.get("queries") or []))
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if _fixture_passed(report) else 1
+    return 0 if report["overall"]["queries"] > 0 else 1
 
 
 if __name__ == "__main__":

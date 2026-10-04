@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Labeled Pretty memory retrieval queries. Recognition = early customer wording; case = understanding/handling. Run: python -m evaluation.pretty_memory_eval",
+  "description": "Labeled Pretty memory retrieval queries for the production TextEncoder. Recognition = early customer wording; case = understanding/handling. Run: python -m evaluation.pretty_memory_eval",
   "cases": [
     {
       "case_key": "wati:return-1",
@@ -10,8 +10,8 @@
       "role_id": "customer_success",
       "review_status": "unreviewed",
       "case_type": "order",
-      "recognition_text": "customer wants a return pickup for an online order",
-      "case_text": "online order return courier pickup emailed operations",
+      "recognition_text": "אפשר לבוא לקחת החזרה להזמנה באתר?\ntype: order\nturned_out_to_be: Return pickup for an online order.",
+      "case_text": "situation: Return pickup for an online order.\nhandling: Emailed operations to schedule a courier pickup.",
       "case_summary": "Return pickup for an online order."
     },
     {
@@ -22,8 +22,8 @@
       "role_id": "customer_success",
       "review_status": "approved",
       "case_type": "static_info",
-      "recognition_text": "store opening hours question for Mamilla",
-      "case_text": "mamilla opening hours from approved maps",
+      "recognition_text": "מה השעות בממילא?\ntype: static_info\nturned_out_to_be: Asked for Mamilla hours.",
+      "case_text": "situation: Asked for Mamilla store opening hours.\nhandling: Answered from the approved hours map.",
       "case_summary": "Asked for Mamilla hours."
     },
     {
@@ -34,39 +34,47 @@
       "role_id": "customer_success",
       "review_status": "unreviewed",
       "case_type": "static_info",
-      "recognition_text": "store opening hours question for Mamilla",
-      "case_text": "mamilla opening hours from approved maps",
+      "recognition_text": "מה השעות בממילא?\ntype: static_info\nturned_out_to_be: Asked for Mamilla hours, unreviewed.",
+      "case_text": "situation: Asked for Mamilla store opening hours.\nhandling: Answered from the approved hours map.",
       "case_summary": "Asked for Mamilla hours, unreviewed."
+    },
+    {
+      "case_key": "wati:gift-1",
+      "ticket_id": "gift-1",
+      "conversation_id": "c-gift",
+      "wa_id": "972500000066",
+      "role_id": "customer_success",
+      "review_status": "unreviewed",
+      "case_type": "order",
+      "recognition_text": "יש לי כרטיס מתנה שלא עובד באתר\ntype: order\nturned_out_to_be: Gift card balance not applying at checkout.",
+      "case_text": "situation: Gift card would not apply on the website checkout.\nhandling: Checked remaining balance and sent a replacement code.",
+      "case_summary": "Gift card not applying at checkout."
     }
   ],
   "queries": [
     {
       "id": "recognition-return",
       "mode": "recognition",
-      "query_text": "I want a return pickup",
-      "expected_case_keys": ["wati:return-1"],
-      "k": 3
+      "query_text": "אפשר לבוא לקחת החזרה?",
+      "expected_case_keys": ["wati:return-1"]
     },
     {
       "id": "recognition-hours",
       "mode": "recognition",
-      "query_text": "what are the store opening hours",
-      "expected_case_keys": ["wati:hours-1", "wati:hours-unreviewed"],
-      "k": 3
+      "query_text": "מה השעות בממילא?",
+      "expected_case_keys": ["wati:hours-1", "wati:hours-unreviewed"]
     },
     {
       "id": "case-return",
       "mode": "case",
-      "query_text": "online order return courier pickup",
-      "expected_case_keys": ["wati:return-1"],
-      "k": 3
+      "query_text": "Customer wants a courier pickup for an online order return. Operations should be emailed.",
+      "expected_case_keys": ["wati:return-1"]
     },
     {
       "id": "case-hours",
       "mode": "case",
-      "query_text": "mamilla opening hours from approved maps",
-      "expected_case_keys": ["wati:hours-1"],
-      "k": 1
+      "query_text": "Customer asked for Mamilla opening hours. Answer from the approved hours source.",
+      "expected_case_keys": ["wati:hours-1"]
     }
   ]
 }

@@ -112,13 +112,13 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | `POST /memory/recognize` | header `X-API-Key` | Pretty recognition memory from the CRM snapshot (`current.json`) |
 | `POST /memory/similar` | header `X-API-Key` | Pretty case/handling memory from the CRM snapshot |
 
-Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key. Pretty memory reads `PRETTY_MEMORY_SNAPSHOT_DIR/current.json` (default `/home/ubuntu/pretty-memory`). Missing snapshot → 503 `snapshot_not_loaded`. The live index reloads from `current.json` on the next query after the file changes. CRM `review_status` values are `unreviewed`, `draft`, and `approved`; approved ranks above unreviewed. Retrieval eval is separate from pytest:
+Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key. Pretty memory reads `PRETTY_MEMORY_SNAPSHOT_DIR/current.json` (default `/home/ubuntu/pretty-memory`). Missing snapshot → 503 `snapshot_not_loaded`. The live index reloads from `current.json` on the next query after the file changes. CRM `review_status` values are `unreviewed`, `draft`, and `approved`; approved ranks above unreviewed. Retrieval eval is separate from pytest. It uses the same production `TextEncoder` (`intfloat/multilingual-e5-small`) and `PrettyMemoryIndex` path as `/memory/recognize` and `/memory/similar`:
 
 ```bash
 python -m evaluation.pretty_memory_eval
 ```
 
-It reports `hit@1`, `hit@3`, `recall@5`, and queries per mode (`recognition` vs `case`) from `evaluation/pretty_memory_fixture.json`.
+It reports `hit@1`, `hit@3`, `recall@5`, and queries per mode (`recognition` vs `case`) from `evaluation/pretty_memory_fixture.json`. First run downloads the embedding weights. The result is a baseline of real retrieval, not a guaranteed-pass test.
 
 Catalog visual matching uses per-view 768-d SigLIP vectors (`main` / `pers` / `side` stay separate; model score is the best view). Tall screenshots are cropped to pale product panels before encoding. Audit/refresh stale CDN hashes:
 
