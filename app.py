@@ -32,6 +32,7 @@ from embeddings.contract import (
     TextEmbeddingsResponse,
     PrettyMemoryQueryRequest,
     PrettyMemoryQueryResponse,
+    PrettyMemoryReloadResponse,
     TextSimilarityRequest,
     TextSimilarityResponse,
 )
@@ -369,6 +370,31 @@ def similarity_text(
     except Exception:
         logger.exception("text similarity failure")
         raise HTTPException(status_code=500, detail="text encoder/service-level failure") from None
+
+
+@app.post("/memory/reload", response_model=PrettyMemoryReloadResponse)
+def memory_reload(
+    store: PrettyMemoryStore = Depends(_pretty_memory),
+    encoder: TextEncoder = Depends(_text_encoder),
+) -> PrettyMemoryReloadResponse:
+    try:
+        result = store.reload()
+        index = result.get("index")
+        if index is None:
+            raise HTTPException(status_code=503, detail="snapshot_not_loaded")
+        return PrettyMemoryReloadResponse(
+            ok=bool(result.get("ok")),
+            snapshot_loaded=True,
+            kept_previous=bool(result.get("kept_previous")),
+            snapshot_version=index.snapshot_version,
+            embedding_model=index.embedding_model or encoder.model_name,
+            count=len(index.records),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("pretty memory reload failure")
+        raise HTTPException(status_code=500, detail="pretty memory reload failure") from None
 
 
 @app.post("/memory/recognize", response_model=PrettyMemoryQueryResponse)

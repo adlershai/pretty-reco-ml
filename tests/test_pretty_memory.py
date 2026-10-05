@@ -153,6 +153,16 @@ def test_approved_crm_status_ranks_above_unreviewed() -> None:
     assert review_weight("draft") > review_weight("unreviewed")
 
 
+def test_memory_reload_endpoint_rebuilds_index(memory_client: TestClient) -> None:
+    response = memory_client.post("/memory/reload", headers={"X-API-Key": "test-key"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["snapshot_loaded"] is True
+    assert body["kept_previous"] is False
+    assert body["count"] == 3
+
+
 def test_recognize_returns_matching_case(memory_client: TestClient) -> None:
     response = memory_client.post(
         "/memory/recognize",
@@ -194,10 +204,29 @@ def test_reload_replaces_stale_index(tmp_path: Path) -> None:
     payload["cases"] = [payload["cases"][1]]
     payload["published_at"] = "2026-10-03T01:00:00Z"
     (tmp_path / "current.json").write_text(json.dumps(payload), encoding="utf-8")
-    second = store.index()
+    stale = store.index()
+    assert stale is not None
+    assert len(stale.records) == 3
+    result = store.reload()
+    assert result["ok"] is True
+    assert result["kept_previous"] is False
+    second = result["index"]
     assert second is not None
     assert len(second.records) == 1
     assert second.snapshot_version == "2026-10-03T01:00:00Z"
+
+
+def test_reload_keeps_previous_index_when_new_snapshot_is_invalid(tmp_path: Path) -> None:
+    write_snapshot(tmp_path)
+    store = PrettyMemoryStore(str(tmp_path), MemoryEncoder())
+    first = store.index()
+    assert first is not None
+    (tmp_path / "current.json").write_text("{not-json", encoding="utf-8")
+    result = store.reload()
+    assert result["ok"] is False
+    assert result["kept_previous"] is True
+    assert result["index"] is first
+    assert len(store.index().records) == 3
 
 
 def test_missing_snapshot_is_503(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

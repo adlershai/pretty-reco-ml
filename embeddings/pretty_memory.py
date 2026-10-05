@@ -177,9 +177,7 @@ class PrettyMemoryStore:
     def reload_if_changed(self) -> PrettyMemoryIndex | None:
         if not self.path.is_file():
             with self._lock:
-                self._index = None
-                self._mtime_ns = None
-            return None
+                return self._index
         mtime_ns = self.path.stat().st_mtime_ns
         with self._lock:
             if self._index is not None and self._mtime_ns == mtime_ns:
@@ -193,4 +191,31 @@ class PrettyMemoryStore:
         return built
 
     def index(self) -> PrettyMemoryIndex | None:
+        with self._lock:
+            if self._index is not None:
+                return self._index
         return self.reload_if_changed()
+
+    def reload(self) -> dict[str, Any]:
+        previous: PrettyMemoryIndex | None
+        with self._lock:
+            previous = self._index
+        try:
+            if not self.path.is_file():
+                if previous is not None:
+                    logger.error("pretty memory reload failed; keeping previous index path=%s", self.path)
+                    return {"ok": False, "kept_previous": True, "index": previous}
+                return {"ok": False, "kept_previous": False, "index": None}
+            document = load_snapshot_document(self.path)
+            built = build_index(document, self.encoder)
+            mtime_ns = self.path.stat().st_mtime_ns
+            with self._lock:
+                self._index = built
+                self._mtime_ns = mtime_ns
+            logger.info("pretty memory snapshot reloaded path=%s cases=%s", self.path, len(built.records))
+            return {"ok": True, "kept_previous": False, "index": built}
+        except Exception:
+            logger.exception("pretty memory reload failure path=%s", self.path)
+            if previous is not None:
+                return {"ok": False, "kept_previous": True, "index": previous}
+            raise

@@ -207,3 +207,12 @@ class PrettyMemoryQueryResponse(BaseModel):
     snapshot_version: str = ""
     embedding_model: str = ""
     results: list[PrettyMemoryHit]
+
+
+class PrettyMemoryReloadResponse(BaseModel):
+    ok: bool = True
+    snapshot_loaded: bool = False
+    kept_previous: bool = False
+    snapshot_version: str = ""
+    embedding_model: str = ""
+    count: int = 0
