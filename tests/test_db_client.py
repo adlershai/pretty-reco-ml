@@ -154,24 +154,33 @@ def test_empty_view_name_raises() -> None:
     assert session.calls == []
 
 
-def test_all_posts_parameterized_select() -> None:
+def test_proc_posts_json_value_and_returns_rows() -> None:
     client, session = make_client([FakeResponse(200, [{"model": "49166_008"}])])
-    rows = client.all(
-        "SELECT * FROM vw_reco_model_representation_v1 WHERE model IN (?)",
-        ["49166_008"],
-    )
+    rows = client.proc("get_reco_model_representation", {"models": ["49166_008"]})
     assert rows == [{"model": "49166_008"}]
     assert session.calls[0]["json"] == {
-        "type": "all",
-        "sql": "SELECT * FROM vw_reco_model_representation_v1 WHERE model IN (?)",
-        "values": ["49166_008"],
+        "type": "proc",
+        "procName": "get_reco_model_representation",
+        "value": '{"models":["49166_008"]}',
     }
 
 
-def test_all_empty_sql_raises() -> None:
+def test_proc_wraps_single_row_object() -> None:
+    client, _session = make_client([FakeResponse(200, {"id": 9, "model": "40724_001"})])
+    assert client.proc("get_reco_model_codes", {}) == [{"id": 9, "model": "40724_001"}]
+
+
+def test_select_rejects_where_clause() -> None:
     client, session = make_client([])
-    with pytest.raises(DbApiError, match="sql is required"):
-        client.all("  ")
+    with pytest.raises(DbApiError, match="filtered select is not allowed"):
+        client.select("models", where="id > ?", values=[0])
+    assert session.calls == []
+
+
+def test_all_is_not_allowed() -> None:
+    client, session = make_client([])
+    with pytest.raises(DbApiError, match="all is not allowed"):
+        client.all("SELECT 1")
     assert session.calls == []
 
 

@@ -249,7 +249,7 @@ python -m inference.run --new-models path/to/load.csv --latest
 python -m inference.run --new-models path/to/load.csv --snapshot local/snapshots/<timestamp>
 ```
 
-`--new-models` is a headerless CSV; column A is the model code. New catalog rows (visual + categoricals) are loaded through the DB API (`type=all` on `vw_reco_model_representation_v1`). Customer history comes from the latest snapshot. New model codes are not inserted into history.
+`--new-models` is a headerless CSV; column A is the model code. New catalog rows (visual + categoricals) are loaded through the DB API (`type=proc` `get_reco_model_representation`). Customer history comes from the latest snapshot. New model codes are not inserted into history.
 
 Writes gitignored files under `local/outputs/`:
 

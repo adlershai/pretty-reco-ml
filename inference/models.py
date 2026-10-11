@@ -9,21 +9,26 @@ import torch
 
 from data.dataset_builder import combine_visual_embeddings, parse_embedding
 from data.db_client import DbApiClient
-from data.schemas import MODEL_FEATURE_COLUMNS, MODEL_VIEW, VISUAL_EMBEDDING_COLUMNS
+from data.schemas import MODEL_FEATURE_COLUMNS, VISUAL_EMBEDDING_COLUMNS
 from training.config import TrainConfig, UNKNOWN_TOKEN
 from training.dataset import CatalogModel, collate_batch
 from training.feature_encoders import FeatureEncoders, categorical_string
 from training.two_tower import TwoTowerModel
 
 REQUIRED_MODEL_FIELDS = MODEL_FEATURE_COLUMNS
+MODEL_REPRESENTATION_PROC = "get_reco_model_representation"
+PROC_CODE_CHUNK = 200
 
 
 def fetch_model_representation(client: DbApiClient, codes: list[str]) -> list[dict[str, Any]]:
-    if not codes:
+    wanted = [str(code).strip() for code in codes if str(code or "").strip()]
+    if not wanted:
         return []
-    placeholders = ", ".join("?" for _ in codes)
-    sql = f"SELECT * FROM {MODEL_VIEW} WHERE model IN ({placeholders})"
-    return client.all(sql, list(codes))
+    rows: list[dict[str, Any]] = []
+    for index in range(0, len(wanted), PROC_CODE_CHUNK):
+        chunk = wanted[index : index + PROC_CODE_CHUNK]
+        rows.extend(client.proc(MODEL_REPRESENTATION_PROC, {"models": chunk}))
+    return rows
 
 
 def catalog_from_rows(rows: list[dict[str, Any]]) -> dict[str, CatalogModel]:

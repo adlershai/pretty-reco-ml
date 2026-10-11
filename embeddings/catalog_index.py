@@ -28,6 +28,8 @@ from evaluation.image_match import (
 logger = logging.getLogger("embeddings.catalog_index")
 
 LOAD_CHUNK = 80
+MODEL_CODES_PROC = "get_reco_model_codes"
+IMAGE_EMBEDDINGS_PROC = "get_reco_model_image_embeddings"
 CACHE_DIR = LOCAL_ROOT / "cache"
 CACHE_META = "catalog_image_index.json"
 CACHE_VECTORS = "catalog_image_index.npz"
@@ -130,24 +132,31 @@ def load_catalog_cache(source: str, embedding_model: str) -> list[CatalogImage] 
     return rows
 
 
+def load_models_by_id(client: DbApiClient) -> dict[int, str]:
+    mapping: dict[int, str] = {}
+    for row in client.proc(MODEL_CODES_PROC, {}):
+        try:
+            row_id = int(row.get("id"))
+        except (TypeError, ValueError):
+            continue
+        code = str(row.get("model") or "").strip()
+        if code:
+            mapping[row_id] = code
+    logger.info("catalog model codes loaded: %s", len(mapping))
+    return mapping
+
+
 def load_catalog_from_table(client: DbApiClient, embedding_model: str) -> list[CatalogImage]:
+    models_by_id = load_models_by_id(client)
     records: list[dict[str, Any]] = []
     after_id = 0
     while True:
-        batch = client.all(
-            f"""SELECT e.id, e.model_id, e.image_type, e.embedding, e.embedding_model,
-                       e.embedding_dimension, e.image_hash, m.model AS model
-                FROM reco_model_image_embeddings e
-                INNER JOIN models m ON m.id = e.model_id
-                WHERE e.embedding_model = ?
-                  AND e.id > ?
-                ORDER BY e.id ASC
-                LIMIT {LOAD_CHUNK}""",
-            [embedding_model, after_id],
+        batch = client.proc(
+            IMAGE_EMBEDDINGS_PROC,
+            {"embeddingModel": embedding_model, "afterId": after_id},
         )
         if not batch:
             break
-        records.extend(batch)
         max_id = after_id
         for row in batch:
             try:
@@ -156,6 +165,13 @@ def load_catalog_from_table(client: DbApiClient, embedding_model: str) -> list[C
                 continue
             if row_id > max_id:
                 max_id = row_id
+            model_id_raw = row.get("model_id")
+            try:
+                model_id = int(model_id_raw) if model_id_raw is not None else None
+            except (TypeError, ValueError):
+                model_id = None
+            row["model"] = models_by_id.get(model_id, "") if model_id is not None else ""
+            records.append(row)
         logger.info("catalog table rows loaded: %s", len(records))
         if len(batch) < LOAD_CHUNK or max_id <= after_id:
             break

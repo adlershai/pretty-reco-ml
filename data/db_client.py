@@ -75,15 +75,57 @@ class DbApiClient:
         rows = normalize_view_payload(body)
         return [_normalize_record(row, name) for row in rows]
 
-    def all(self, sql: str, values: list[Any] | None = None) -> list[dict[str, Any]]:
-        """Parameterized SELECT via type=all. No direct MySQL."""
-        statement = str(sql or "").strip()
-        if not statement:
-            raise DbApiError("sql is required")
-        payload = {"type": "all", "sql": statement, "values": list(values or [])}
+    def select(
+        self,
+        table: str,
+        *,
+        fields: list[str] | None = None,
+        where: str | None = None,
+        values: list[Any] | None = None,
+        order_by: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Unfiltered table SELECT via type=select. Filtered reads use proc()."""
+        name = str(table or "").strip()
+        if not name:
+            raise DbApiError("table is required")
+        if where:
+            raise DbApiError("filtered select is not allowed; use proc")
+        options: dict[str, Any] = {}
+        if fields:
+            options["fields"] = list(fields)
+        if values is not None:
+            options["values"] = list(values)
+        if order_by:
+            options["orderBy"] = str(order_by)
+        if limit is not None:
+            options["limit"] = int(limit)
+        if offset is not None:
+            options["offset"] = int(offset)
+        payload = {"type": "select", "table_name": name, "options": options}
         body = self._post(payload)
         rows = normalize_view_payload(body)
-        return [_normalize_record(row, "all") for row in rows]
+        return [_normalize_record(row, name) for row in rows]
+
+    def proc(self, proc_name: str, value: Any = None) -> list[dict[str, Any]]:
+        """CALL procName(?) via type=proc. JSON object/list values are serialized."""
+        name = str(proc_name or "").strip()
+        if not name:
+            raise DbApiError("proc name is required")
+        if value is None:
+            payload_value = "{}"
+        elif isinstance(value, (dict, list)):
+            payload_value = json.dumps(value, separators=(",", ":"))
+        else:
+            payload_value = str(value)
+        payload = {"type": "proc", "procName": name, "value": payload_value}
+        body = self._post(payload)
+        rows = normalize_view_payload(_coerce_proc_payload(body))
+        return [_normalize_record(row, name) for row in rows]
+
+    def all(self, sql: str, values: list[Any] | None = None) -> list[dict[str, Any]]:
+        raise DbApiError("all is not allowed")
 
     def insert(
         self,
@@ -223,6 +265,22 @@ def _http_error_message(response: requests.Response) -> str:
     if snippet:
         return f"DB API {response.status_code}: {snippet}"
     return f"DB API {response.status_code}"
+
+
+def _coerce_proc_payload(payload: Any) -> Any:
+    """step-db returns a list, a single row object, or an envelope."""
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and not payload.get("error"):
+        for key in ("data", "rows", "result", "records"):
+            if isinstance(payload.get(key), list):
+                return payload
+        if isinstance(payload.get("fields"), list) and isinstance(payload.get("values"), list):
+            return payload
+        return [payload]
+    return payload
 
 
 def normalize_view_payload(payload: Any) -> list[Any]:
