@@ -20,6 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from embeddings.contract import (
+    CatalogRefreshResponse,
     EmbeddingsRequest,
     EmbeddingsResponse,
     ImageMatchDecideRequest,
@@ -42,6 +43,7 @@ from embeddings.text_similarity import DEFAULT_TEXT_MODEL, TextEncoder, rank_can
 from embeddings.vision_encoder import VisionEncoder
 from embeddings.worker import DEFAULT_BATCH_SIZE, run
 from embeddings.catalog_index import CatalogIndex, load_catalog_index
+from embeddings.catalog_refresh import CatalogRefreshService
 from embeddings.match_image import DEFAULT_TOP, decide_match, run_match
 from inference.recommender import (
     MODEL_VERSION,
@@ -96,6 +98,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.pretty_memory = None
     app.state.catalog = None
     app.state.load_catalog = load_catalog_index
+    app.state.catalog_refresh = CatalogRefreshService(
+        loader=lambda: load_catalog_index(refresh=True),
+        get_current=lambda: getattr(app.state, "catalog", None),
+        activate=lambda index: setattr(app.state, "catalog", index),
+    )
     yield
 
 
@@ -370,6 +377,32 @@ def similarity_text(
     except Exception:
         logger.exception("text similarity failure")
         raise HTTPException(status_code=500, detail="text encoder/service-level failure") from None
+
+
+def _catalog_refresh_service(request: Request) -> CatalogRefreshService:
+    service: CatalogRefreshService | None = getattr(request.app.state, "catalog_refresh", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="catalog refresh is not available")
+    return service
+
+
+@app.get("/catalog/refresh", response_model=CatalogRefreshResponse)
+def catalog_refresh_status(
+    service: CatalogRefreshService = Depends(_catalog_refresh_service),
+    _: None = Depends(require_api_key),
+) -> CatalogRefreshResponse:
+    return CatalogRefreshResponse.model_validate(service.status())
+
+
+@app.post("/catalog/refresh", response_model=CatalogRefreshResponse)
+def catalog_refresh(
+    service: CatalogRefreshService = Depends(_catalog_refresh_service),
+    _: None = Depends(require_api_key),
+) -> CatalogRefreshResponse | JSONResponse:
+    payload = service.refresh()
+    if payload.get("status") == "ready":
+        return CatalogRefreshResponse.model_validate(payload)
+    return JSONResponse(status_code=503, content=payload)
 
 
 @app.post("/memory/reload", response_model=PrettyMemoryReloadResponse)

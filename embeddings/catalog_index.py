@@ -59,6 +59,14 @@ class CatalogIndex:
     def search_models(self, query: np.ndarray, top: int = 10) -> list[ModelHit]:
         return aggregate_models_max(self.search_images(query))[: max(0, int(top))]
 
+    @property
+    def image_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def model_count(self) -> int:
+        return len({str(row.model).strip() for row in self.rows if str(row.model).strip()})
+
 
 def _cache_paths() -> tuple[Path, Path]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

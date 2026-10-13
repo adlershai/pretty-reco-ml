@@ -112,6 +112,8 @@ Do not publish port 8000. On **adler**, Nginx should proxy `https://ai.adler-bac
 | `POST /memory/recognize` | header `X-API-Key` | Pretty recognition memory from the CRM snapshot (`current.json`) |
 | `POST /memory/similar` | header `X-API-Key` | Pretty case/handling memory from the CRM snapshot |
 | `POST /memory/reload` | header `X-API-Key` | 04:00 load of `current.json`; swaps the live index only after a full rebuild |
+| `POST /catalog/refresh` | header `X-API-Key` | rebuild the visual catalog from persisted embeddings and atomically swap the live index |
+| `GET /catalog/refresh` | header `X-API-Key` | last catalog refresh job id/status, image count, and model count |
 
 Set `RECO_API_KEY` in the environment (see `.env.example`). Never commit the key. Pretty memory reads `PRETTY_MEMORY_SNAPSHOT_DIR/current.json` (default `/home/ubuntu/pretty-memory`). Missing snapshot on a cold start → 503 `snapshot_not_loaded`. A failed 04:00 reload keeps the previous live index. CRM `review_status` values are `unreviewed`, `draft`, and `approved`; approved ranks above unreviewed. Retrieval eval is separate from pytest. It uses the same production `TextEncoder` (`intfloat/multilingual-e5-small`) and `PrettyMemoryIndex` path as `/memory/recognize` and `/memory/similar`:
 

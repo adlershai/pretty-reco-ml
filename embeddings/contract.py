@@ -216,3 +216,15 @@ class PrettyMemoryReloadResponse(BaseModel):
     snapshot_version: str = ""
     embedding_model: str = ""
     count: int = 0
+
+
+class CatalogRefreshResponse(BaseModel):
+    ok: bool = True
+    job_id: str = ""
+    status: Literal["idle", "running", "ready", "failed"] = "idle"
+    coalesced: bool = False
+    kept_previous: bool = False
+    built_at: str | None = None
+    image_count: int = 0
+    model_count: int = 0
+    error: str | None = None
