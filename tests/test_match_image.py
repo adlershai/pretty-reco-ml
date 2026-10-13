@@ -6,7 +6,12 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from embeddings.catalog_index import CatalogIndex
-from embeddings.match_image import match_image, match_result_to_dict
+from embeddings.match_image import (
+    GARBAGE_MARGIN,
+    _confident_garbage,
+    match_image,
+    match_result_to_dict,
+)
 from embeddings.vision_encoder import EMBEDDING_DIMENSION
 from evaluation.image_match import CatalogImage
 
@@ -101,6 +106,14 @@ def test_packshot_keeps_full_frame_when_it_is_the_best_crop() -> None:
     assert result.crop.reason == "full"
 
 
+def test_confident_garbage_requires_junk_margin() -> None:
+    assert _confident_garbage("garbage", {"footwear": 0.1, "irrelevant": 0.4, "garbage": 0.4}) is True
+    assert _confident_garbage("garbage", {"footwear": 0.22, "irrelevant": 0.24, "garbage": 0.24}) is True
+    assert _confident_garbage("unknown", {"footwear": 0.22, "irrelevant": 0.24}) is False
+    assert _confident_garbage("unknown", {"footwear": 0.1, "irrelevant": 0.4}) is True
+    assert _confident_garbage("shoe", {"footwear": 0.1, "irrelevant": 0.4, "garbage": 0.4}) is False
+
+
 def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
     class JunkEncoder(FakeEncoder):
         def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
@@ -133,7 +146,196 @@ def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
     payload = match_result_to_dict(result, image_size=image.size)
     assert payload["status"] == "garbage"
     assert payload["image_kind"] == "garbage"
+    assert payload["unknown_fallback"] is False
     assert payload["candidates"] == []
+    assert payload["verifier"] is None
+
+
+def test_match_image_ambiguous_unknown_scene_is_unknown() -> None:
+    class AmbiguousEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.22, "irrelevant": 0.24}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "unknown", {"footwear": 0.22, "irrelevant": 0.24, "order": 0.05, "garbage": 0.24}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "unknown", {"order": 0.05, "garbage": 0.24, "irrelevant": 0.24}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="52026_005",
+                image_type="main",
+                embedding=_unit([0.0, 0.0, 1.0]),
+                model_id=8,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, AmbiguousEncoder(), catalog, top=10)
+    assert 0.24 - 0.22 < GARBAGE_MARGIN
+    assert result.image_kind == "unknown"
+    assert result.unknown_fallback is True
+    assert result.match is not None
+    payload = match_result_to_dict(result, image_size=image.size, image=image, catalog=catalog)
+    assert payload["status"] == "needs_verification"
+    assert payload["verifier"] is not None
+
+
+def test_match_image_failed_relevance_without_scene_is_not_garbage() -> None:
+    class RelevanceOnlyEncoder(FakeEncoder):
+        classify_scene = None
+        classify_non_shoe = None
+
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.21, "irrelevant": 0.23}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="52026_005",
+                image_type="main",
+                embedding=_unit([0.0, 0.0, 1.0]),
+                model_id=8,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, RelevanceOnlyEncoder(), catalog, top=10)
+    assert result.image_kind == "unknown"
+    assert result.candidates != []
+    payload = match_result_to_dict(result, image_size=image.size, catalog=catalog)
+    assert payload["status"] == "needs_verification"
+    assert payload["image_kind"] == "unknown"
+
+
+def test_match_image_relevance_only_strong_junk_is_garbage() -> None:
+    class RelevanceOnlyJunk(FakeEncoder):
+        classify_scene = None
+        classify_non_shoe = None
+
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.1, "irrelevant": 0.4}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="51604_004",
+                image_type="main",
+                embedding=_unit([0.0, 0.0, 1.0]),
+                model_id=4,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, RelevanceOnlyJunk(), catalog, top=10)
+    assert result.image_kind == "garbage"
+    assert result.candidates == []
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "garbage"
+    assert payload["verifier"] is None
+
+
+def test_match_image_low_catalog_similarity_is_not_garbage() -> None:
+    class WeakCatalogEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.20, "irrelevant": 0.22}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "shoe", {"footwear": 0.20, "irrelevant": 0.22, "order": 0.04, "garbage": 0.22}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "unknown", {"order": 0.04, "garbage": 0.22, "irrelevant": 0.22}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="51604_004",
+                image_type="main",
+                embedding=_unit([0.0, 0.0, 1.0]),
+                model_id=4,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, WeakCatalogEncoder(), catalog, top=10)
+    assert result.image_kind == "unknown"
+    assert result.unknown_fallback is True
+    assert result.candidates != []
+    payload = match_result_to_dict(result, image_size=image.size, catalog=catalog)
+    assert payload["status"] == "needs_verification"
+    assert payload["image_kind"] == "unknown"
+
+
+def test_match_image_unknown_fallback_searches_catalog() -> None:
+    class InconclusiveEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.21, "irrelevant": 0.24}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "shoe", {"footwear": 0.21, "irrelevant": 0.18, "order": 0.05, "garbage": 0.18}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "garbage", {"order": 0.05, "garbage": 0.18, "irrelevant": 0.18}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="52026_005",
+                image_type="main",
+                embedding=_unit([0.0, 0.0, 1.0]),
+                model_id=8,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, InconclusiveEncoder(), catalog, top=10)
+    assert result.image_kind == "unknown"
+    assert result.unknown_fallback is True
+    assert result.match is not None
+    assert result.match.model == "52026_005"
+    payload = match_result_to_dict(result, image_size=image.size, image=image, catalog=catalog)
+    assert payload["status"] == "needs_verification"
+    assert payload["image_kind"] == "unknown"
+    assert payload["unknown_fallback"] is True
+    assert payload["candidates"][0]["model"] == "52026_005"
+    assert payload["verifier"] is not None
+    assert payload["match"] is None
+
+
+def test_match_image_unknown_without_candidates_is_uncertain() -> None:
+    class InconclusiveEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.21, "irrelevant": 0.24}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "shoe", {"footwear": 0.21, "irrelevant": 0.18, "order": 0.05, "garbage": 0.18}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "garbage", {"order": 0.05, "garbage": 0.18, "irrelevant": 0.18}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows([])
+    result = match_image(image, InconclusiveEncoder(), catalog, top=10)
+    assert result.image_kind == "unknown"
+    assert result.match is None
+    assert result.candidates == []
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "uncertain"
+    assert payload["image_kind"] == "unknown"
+    assert payload["unknown_fallback"] is True
+    assert payload["verifier"] is None
 
 
 def test_match_image_routes_order_without_catalog_search() -> None:

@@ -61,6 +61,7 @@ IMAGE_KIND_SHOE = "shoe"
 IMAGE_KIND_ORDER = "order"
 IMAGE_KIND_DELIVERY = "delivery_notice"
 IMAGE_KIND_GARBAGE = "garbage"
+IMAGE_KIND_UNKNOWN = "unknown"
 
 
 def classify_relevance(

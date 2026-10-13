@@ -116,7 +116,8 @@ class ImageMatchResponse(BaseModel):
     relevance: Literal["footwear", "irrelevant"]
     scores: dict[str, float]
     embedding_model: str
-    image_kind: Literal["shoe", "order", "delivery_notice", "garbage"] = "shoe"
+    image_kind: Literal["shoe", "order", "delivery_notice", "garbage", "unknown"] = "shoe"
+    unknown_fallback: bool = False
     order: OrderExtract | None = None
     delivery: DeliveryExtract | None = None
 
