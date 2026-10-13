@@ -38,22 +38,24 @@ def catalog():
 
 
 @pytest.mark.live
+@pytest.mark.parametrize("include_hero", [False, True])
 @pytest.mark.parametrize("event_id,path,expected_model,require_model", SHOE_FIXTURES)
 def test_pdp_screenshot_routes_shoe_not_order(
-    event_id, path, expected_model, require_model, encoder, catalog
+    event_id, path, expected_model, require_model, include_hero, encoder, catalog
 ) -> None:
     if not path.is_file():
         pytest.skip(f"{path.name} fixture is missing")
     image = Image.open(path).convert("RGB")
-    result = match_image(image, encoder, catalog, top=10)
+    result = match_image(image, encoder, catalog, top=10, include_hero=include_hero)
     assert result.image_kind == "shoe", (
-        f"{event_id} routed {result.image_kind} scores={result.scores}"
+        f"{event_id} hero={include_hero} routed {result.image_kind} scores={result.scores}"
     )
     assert result.order is None
     models = [hit.model for hit in result.candidates]
     if require_model:
         assert expected_model in models, (
-            f"{event_id} expected {expected_model} in top-10 {models} scores={result.scores}"
+            f"{event_id} hero={include_hero} expected {expected_model} in top-10 {models} "
+            f"crop={result.crop.reason} scores={result.scores}"
         )
 
 

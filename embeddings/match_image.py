@@ -224,6 +224,7 @@ def match_image(
     extract_order_fn: Any = None,
     extract_delivery_fn: Any = None,
     ocr_fn: Any = None,
+    include_hero: bool | None = None,
 ) -> ImageMatchResult:
     """Whole-image document intent first; shoe only if the frame is not an order/delivery."""
     rgb = image.convert("RGB")
@@ -238,7 +239,7 @@ def match_image(
     else:
         delivery_fields = default_extract_delivery(rgb, text=text)
 
-    boxes = propose_crops(rgb)
+    boxes = propose_crops(rgb, include_hero=include_hero)
     crops = [crop_image(rgb, box) for box in boxes]
     vectors = encoder.encode_batch(crops)
     scene, scene_scores = _non_shoe_kind(encoder, vectors[0])

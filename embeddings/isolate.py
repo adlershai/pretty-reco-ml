@@ -2,11 +2,16 @@
 
 Tall screenshots (browser chrome, page UI) are split into pale studio-background
 panels. Near-square packshots keep the original frame so toe/heel are not cut.
+
+MATCH_HERO_CROP (off by default): when a website/story hero region is unambiguous,
+propose that box instead of every studio panel so gallery thumbnails cannot win
+catalog-score selection. Ambiguous layouts keep the existing panel set.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 import numpy as np
 from PIL import Image
@@ -19,6 +24,13 @@ ROW_THRESH = 0.35
 COL_THRESH = 0.25
 MIN_RUN_FRAC = 0.05
 EDGE_INSET = 8
+HERO_CROP_ENV = "MATCH_HERO_CROP"
+HERO_DOMINANCE = 1.8
+HERO_MAX_TOP_FRAC = 0.55
+HERO_GAP_FRAC = 0.18
+HERO_ASPECT = 1.15
+PANEL_MAX_FRAC = 0.92
+GAP_PALE_MAX = 0.55
 
 
 @dataclass(frozen=True)
@@ -112,13 +124,68 @@ def pale_panels(image: Image.Image) -> list[CropBox]:
     return boxes
 
 
-def propose_crops(image: Image.Image) -> list[CropBox]:
-    """Always includes the full frame; adds studio panels for tall screenshots."""
+def hero_crop_enabled() -> bool:
+    return os.environ.get(HERO_CROP_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _photo_gap_hero(panels: list[CropBox], image: Image.Image) -> CropBox | None:
+    """Gap between pale chrome bands, only if that gap is a photo not empty page."""
+    ordered = sorted(panels, key=lambda box: (box.top, -box.area))
+    width, height = image.size
+    mask = studio_mask(image)
+    min_gap = int(height * HERO_GAP_FRAC)
+    for index in range(len(ordered) - 1):
+        gap_top = ordered[index].bottom
+        gap_bottom = ordered[index + 1].top
+        if gap_bottom - gap_top < min_gap:
+            continue
+        band = mask[gap_top:gap_bottom]
+        if band.size == 0 or float(band.mean()) > GAP_PALE_MAX:
+            continue
+        left = min(ordered[index].left, ordered[index + 1].left)
+        right = max(ordered[index].right, ordered[index + 1].right)
+        box = _clamp_box(left, gap_top, right, gap_bottom, width, height)
+        if box is None:
+            continue
+        return CropBox(box.left, box.top, box.right, box.bottom, "hero_gap")
+    return None
+
+
+def _upper_hero(panel: CropBox, height: int) -> CropBox:
+    """Website PDP: pale hero and gallery often merge; keep the upper square."""
+    hero_h = min(panel.height, int(panel.width * HERO_ASPECT), int(height * 0.62))
+    hero_h = max(hero_h, 32)
+    if hero_h >= int(panel.height * 0.85):
+        return CropBox(panel.left, panel.top, panel.right, panel.bottom, "hero_panel")
+    return CropBox(panel.left, panel.top, panel.right, panel.top + hero_h, "hero_upper")
+
+
+def clear_hero_crop(image: Image.Image) -> CropBox | None:
+    """Dominant PDP hero or photo-between-chrome. None when the layout is ambiguous."""
     rgb = image.convert("RGB")
     width, height = rgb.size
-    boxes = [CropBox(0, 0, width, height, "full")]
-    if height > width * TALL_ASPECT:
-        boxes.extend(pale_panels(rgb))
+    if height <= width * TALL_ASPECT:
+        return None
+    usable = [
+        box
+        for box in pale_panels(rgb)
+        if box.area < int(width * height * PANEL_MAX_FRAC)
+    ]
+    gap = _photo_gap_hero(usable, rgb)
+    if gap is not None:
+        return gap
+    if not usable:
+        return None
+    ordered = sorted(usable, key=lambda box: (-box.area, box.top))
+    hero = ordered[0]
+    if hero.top > height * HERO_MAX_TOP_FRAC:
+        return None
+    if len(ordered) >= 2 and hero.area < ordered[1].area * HERO_DOMINANCE:
+        return None
+    return _upper_hero(hero, height)
+
+
+def _dedupe_boxes(boxes: list[CropBox]) -> list[CropBox]:
     unique: list[CropBox] = []
     seen: set[tuple[int, int, int, int]] = set()
     for box in boxes:
@@ -128,6 +195,21 @@ def propose_crops(image: Image.Image) -> list[CropBox]:
         seen.add(key)
         unique.append(box)
     return unique
+
+
+def propose_crops(image: Image.Image, *, include_hero: bool | None = None) -> list[CropBox]:
+    """Full frame always. Tall screenshots add studio panels, or one clear hero."""
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    boxes = [CropBox(0, 0, width, height, "full")]
+    if height > width * TALL_ASPECT:
+        use_hero = hero_crop_enabled() if include_hero is None else include_hero
+        hero = clear_hero_crop(rgb) if use_hero else None
+        if hero is not None:
+            boxes.append(hero)
+        else:
+            boxes.extend(pale_panels(rgb))
+    return _dedupe_boxes(boxes)
 
 
 def crop_image(image: Image.Image, box: CropBox) -> Image.Image:

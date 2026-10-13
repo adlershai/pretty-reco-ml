@@ -28,7 +28,7 @@ pretty-crm-api owns `OPENAI_API_KEY` and `lib/openai.createResponse`. ML owns is
 }
 ```
 
-`top` is SigLIP retrieval size (default 10, max 50). `verify_top` is how many of those candidates CRM should send to the vision verifier (default 10, or env `MATCH_VERIFY_TOP`). Retrieval is raised to at least `verify_top`.
+`top` is SigLIP retrieval size (default 10, max 50). `verify_top` is how many of those candidates CRM should send to the vision verifier (default 10, or env `MATCH_VERIFY_TOP`). Retrieval is raised to at least `verify_top`. `MATCH_HERO_CROP` (default off) replaces competing studio panels with one clearly identified website/story hero region; ambiguous layouts and non-tall packshots keep the existing crop set. SigLIP ranking, Top-10, and MATCH/UNCERTAIN policy are unchanged.
 
 ## Retrieval response
 
