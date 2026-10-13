@@ -6,6 +6,7 @@ import threading
 from typing import Any
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 import app as app_module
@@ -123,6 +124,48 @@ def test_overlapping_refresh_coalesces_to_one_rebuild() -> None:
     assert results[1]["status"] == "ready"
     assert True in {row["coalesced"] for row in results}
     assert False in {row["coalesced"] for row in results}
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("RECO_API_KEY", "test-key")
+
+    class DummyEncoder:
+        embedding_model = "dummy"
+        embedding_dimension = 768
+
+        def encode(self, _image: Any) -> Any:
+            return np.zeros(768, dtype=np.float32)
+
+        def encode_batch(self, images: list[Any]) -> Any:
+            return np.zeros((len(images), 768), dtype=np.float32)
+
+        def classify_relevance(self, _vector: Any) -> tuple[str, dict[str, float]]:
+            return "footwear", {"footwear": 0.42, "irrelevant": 0.11}
+
+    class DummyTextEncoder:
+        model_name = "dummy-text"
+        embedding_dimension = 3
+
+        def encode(self, texts: list[str], *, prefix: str = "passage") -> Any:
+            return np.zeros((len(texts), 3), dtype=np.float32)
+
+    class StubRecommender:
+        model_version = "the_pretty_model_v1"
+        dimension = 64
+
+        @classmethod
+        def load(cls, **_kwargs: Any) -> StubRecommender:
+            return cls()
+
+        def recommend(self, model_code: str, *, limit: int = 100) -> list[dict[str, Any]]:
+            return []
+
+    monkeypatch.setattr(app_module, "VisionEncoder", DummyEncoder)
+    monkeypatch.setattr(app_module, "TextEncoder", DummyTextEncoder)
+    monkeypatch.setattr(app_module, "RecommenderService", StubRecommender)
+    with TestClient(app_module.app) as test_client:
+        yield test_client
 
 
 def test_catalog_refresh_endpoint_requires_key(client: TestClient) -> None:
