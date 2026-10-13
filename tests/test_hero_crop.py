@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 from embeddings.isolate import clear_hero_crop, propose_crops
@@ -105,18 +106,18 @@ def test_ordinary_packshot_has_no_hero() -> None:
 def test_order_fixture_is_not_forced_into_hero() -> None:
     path = FIXTURES / "order_87610.jpg"
     if not path.is_file():
-        return
+        pytest.fail(f"required fixture missing: {path}")
     image = Image.open(path).convert("RGB")
     production = propose_crops(image, include_hero=False)
     gated = propose_crops(image, include_hero=True)
-    if clear_hero_crop(image) is None:
-        assert [box.as_list() for box in production] == [box.as_list() for box in gated]
+    assert clear_hero_crop(image) is None
+    assert [box.as_list() for box in production] == [box.as_list() for box in gated]
 
 
 def test_pdp_fixtures_select_upper_hero_not_full_frame() -> None:
     missing = [name for name in PDP_FIXTURES if not (FIXTURES / name).is_file()]
     if missing:
-        return
+        pytest.fail(f"required PDP fixtures missing: {missing}")
     for name in PDP_FIXTURES:
         image = Image.open(FIXTURES / name).convert("RGB")
         width, height = image.size
