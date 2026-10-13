@@ -108,7 +108,8 @@ def test_packshot_keeps_full_frame_when_it_is_the_best_crop() -> None:
 
 def test_confident_garbage_requires_junk_margin() -> None:
     assert _confident_garbage("garbage", {"footwear": 0.1, "irrelevant": 0.4, "garbage": 0.4}) is True
-    assert _confident_garbage("garbage", {"footwear": 0.22, "irrelevant": 0.24, "garbage": 0.24}) is False
+    assert _confident_garbage("garbage", {"footwear": 0.22, "irrelevant": 0.24, "garbage": 0.24}) is True
+    assert _confident_garbage("unknown", {"footwear": 0.22, "irrelevant": 0.24}) is False
     assert _confident_garbage("unknown", {"footwear": 0.1, "irrelevant": 0.4}) is True
     assert _confident_garbage("shoe", {"footwear": 0.1, "irrelevant": 0.4, "garbage": 0.4}) is False
 
@@ -150,16 +151,16 @@ def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
     assert payload["verifier"] is None
 
 
-def test_match_image_ambiguous_garbage_scene_is_unknown() -> None:
+def test_match_image_ambiguous_unknown_scene_is_unknown() -> None:
     class AmbiguousEncoder(FakeEncoder):
         def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
             return "irrelevant", {"footwear": 0.22, "irrelevant": 0.24}
 
         def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
-            return "garbage", {"footwear": 0.22, "irrelevant": 0.24, "order": 0.05, "garbage": 0.24}
+            return "unknown", {"footwear": 0.22, "irrelevant": 0.24, "order": 0.05, "garbage": 0.24}
 
         def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
-            return "garbage", {"order": 0.05, "garbage": 0.24, "irrelevant": 0.24}
+            return "unknown", {"order": 0.05, "garbage": 0.24, "irrelevant": 0.24}
 
     image = Image.new("RGB", (200, 200), (236, 228, 230))
     catalog = CatalogIndex.from_rows(
@@ -167,7 +168,7 @@ def test_match_image_ambiguous_garbage_scene_is_unknown() -> None:
             CatalogImage(
                 model="52026_005",
                 image_type="main",
-                embedding=_unit([0.0, 1.0, 0.0]),
+                embedding=_unit([0.0, 0.0, 1.0]),
                 model_id=8,
                 embedding_model="google/siglip-base-patch16-224",
                 embedding_dimension=EMBEDDING_DIMENSION,
@@ -198,7 +199,7 @@ def test_match_image_failed_relevance_without_scene_is_not_garbage() -> None:
             CatalogImage(
                 model="52026_005",
                 image_type="main",
-                embedding=_unit([0.0, 1.0, 0.0]),
+                embedding=_unit([0.0, 0.0, 1.0]),
                 model_id=8,
                 embedding_model="google/siglip-base-patch16-224",
                 embedding_dimension=EMBEDDING_DIMENSION,
@@ -227,7 +228,7 @@ def test_match_image_relevance_only_strong_junk_is_garbage() -> None:
             CatalogImage(
                 model="51604_004",
                 image_type="main",
-                embedding=_unit([0.0, 1.0, 0.0]),
+                embedding=_unit([0.0, 0.0, 1.0]),
                 model_id=4,
                 embedding_model="google/siglip-base-patch16-224",
                 embedding_dimension=EMBEDDING_DIMENSION,
@@ -248,10 +249,10 @@ def test_match_image_low_catalog_similarity_is_not_garbage() -> None:
             return "irrelevant", {"footwear": 0.20, "irrelevant": 0.22}
 
         def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
-            return "garbage", {"footwear": 0.20, "irrelevant": 0.22, "order": 0.04, "garbage": 0.22}
+            return "shoe", {"footwear": 0.20, "irrelevant": 0.22, "order": 0.04, "garbage": 0.22}
 
         def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
-            return "garbage", {"order": 0.04, "garbage": 0.22, "irrelevant": 0.22}
+            return "unknown", {"order": 0.04, "garbage": 0.22, "irrelevant": 0.22}
 
     image = Image.new("RGB", (200, 200), (236, 228, 230))
     catalog = CatalogIndex.from_rows(
@@ -292,7 +293,7 @@ def test_match_image_unknown_fallback_searches_catalog() -> None:
             CatalogImage(
                 model="52026_005",
                 image_type="main",
-                embedding=_unit([0.0, 1.0, 0.0]),
+                embedding=_unit([0.0, 0.0, 1.0]),
                 model_id=8,
                 embedding_model="google/siglip-base-patch16-224",
                 embedding_dimension=EMBEDDING_DIMENSION,

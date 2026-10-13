@@ -46,8 +46,8 @@ DEFAULT_TOP = 10
 SCORE_TIE = 1e-6
 # Issue #4 WATI set, 2026-09-21: 753/736 max catalog 0.572; 1070 PDP min 0.655.
 CATALOG_SHOE_MIN = 0.62
-# classify_relevance sends equality to footwear. Garbage needs junk/garbage to beat
-# footwear by this margin; a failed shoe label is not positive irrelevance.
+# classify_relevance sends equality to footwear. On a relevance-only/unknown scene,
+# junk must beat footwear by this margin. classify_scene garbage is enough on its own.
 GARBAGE_MARGIN = 0.05
 
 
@@ -153,13 +153,16 @@ def _junk_score(scores: dict[str, float]) -> float:
 
 
 def _confident_garbage(scene_kind: str, scores: dict[str, float]) -> bool:
-    """Positive irrelevance: junk beats footwear by GARBAGE_MARGIN.
+    """Positive irrelevance, not a leftover after a failed shoe label.
 
-    A scene label of garbage, or classify_relevance missing footwear, is not enough.
-    Shoe/order/delivery scene labels are never garbage here.
+    classify_scene garbage means garbage prompts beat footwear. That is enough.
+    A relevance-only miss (unknown scene) needs junk to beat footwear by
+    GARBAGE_MARGIN. Shoe/order/delivery scene labels are never garbage here.
     """
     if scene_kind in {IMAGE_KIND_SHOE, IMAGE_KIND_ORDER, IMAGE_KIND_DELIVERY}:
         return False
+    if scene_kind == IMAGE_KIND_GARBAGE:
+        return True
     footwear = float(scores.get(RELEVANCE_FOOTWEAR) or 0.0)
     junk = _junk_score(scores)
     if not np.isfinite(footwear) or not np.isfinite(junk):
