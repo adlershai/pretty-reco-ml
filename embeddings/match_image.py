@@ -29,6 +29,7 @@ from embeddings.relevance import (
     IMAGE_KIND_GARBAGE,
     IMAGE_KIND_ORDER,
     IMAGE_KIND_SHOE,
+    IMAGE_KIND_UNKNOWN,
     RELEVANCE_FOOTWEAR,
     RELEVANCE_IRRELEVANT,
 )
@@ -75,6 +76,7 @@ class ImageMatchResult:
     image_kind: str = IMAGE_KIND_SHOE
     order: dict[str, str | None] | None = None
     delivery: dict[str, str | None] | None = None
+    unknown_fallback: bool = False
 
 
 def _model_payload(hit: ModelHit) -> dict[str, Any]:
@@ -96,6 +98,26 @@ def _usable_shoe_crop(box: CropBox, image: Image.Image) -> bool:
     if box.reason == "full":
         return True
     return _crop_fraction(box, image) >= MIN_PANEL_AREA
+
+
+def _fallback_crop_index(
+    crop_scores: list[tuple[CropBox, float]],
+    boxes: list[CropBox],
+) -> int:
+    """Highest catalog score among proposed crops; low similarity is allowed."""
+    best_index = 0
+    best_score = float("-inf")
+    best_box = boxes[0]
+    for index, (box, score) in enumerate(crop_scores):
+        if index == 0:
+            if np.isfinite(score):
+                best_score = score
+            continue
+        if _prefer_crop(score, box, best_score, best_box):
+            best_index = index
+            best_score = score
+            best_box = box
+    return best_index
 
 
 def _catalog_score(catalog: CatalogIndex, vector: np.ndarray) -> float:
@@ -268,20 +290,45 @@ def match_image(
             delivery=delivery_payload(delivery_fields),
         )
 
-    chosen = boxes[0]
+    scene_kind, confident_scores = _scene_kind(encoder, vectors[0])
+    if scene_kind == IMAGE_KIND_GARBAGE:
+        chosen = boxes[0]
+        isolated = isolation_applied(chosen, rgb)
+        return ImageMatchResult(
+            match=None,
+            candidates=[],
+            crop=chosen,
+            shoe_isolated=isolated,
+            relevance=RELEVANCE_IRRELEVANT,
+            scores=confident_scores,
+            embedding_model=encoder.embedding_model,
+            crop_scores=crop_scores,
+            image_kind=IMAGE_KIND_GARBAGE,
+            order=None,
+            delivery=None,
+        )
+
+    fallback_index = _fallback_crop_index(crop_scores, boxes)
+    chosen = boxes[fallback_index]
+    query = vectors[fallback_index]
     isolated = isolation_applied(chosen, rgb)
+    candidates = catalog.search_models(query, top=top)
+    catalog_score = crop_scores[fallback_index][1]
+    scores = dict(confident_scores)
+    scores["catalog"] = float(catalog_score) if np.isfinite(catalog_score) else 0.0
     return ImageMatchResult(
-        match=None,
-        candidates=[],
+        match=candidates[0] if candidates else None,
+        candidates=candidates,
         crop=chosen,
         shoe_isolated=isolated,
         relevance=RELEVANCE_IRRELEVANT,
-        scores=scene_scores,
+        scores=scores,
         embedding_model=encoder.embedding_model,
         crop_scores=crop_scores,
-        image_kind=IMAGE_KIND_GARBAGE,
+        image_kind=IMAGE_KIND_UNKNOWN,
         order=None,
         delivery=None,
+        unknown_fallback=True,
     )
 
 
@@ -295,6 +342,8 @@ def match_result_to_dict(
 ) -> dict[str, Any]:
     width, height = image_size
     candidates = [_model_payload(hit) for hit in result.candidates]
+    kind = result.image_kind or (IMAGE_KIND_SHOE if result.relevance == RELEVANCE_FOOTWEAR else IMAGE_KIND_GARBAGE)
+    fallback = bool(result.unknown_fallback or kind == IMAGE_KIND_UNKNOWN)
     footwear = result.relevance == RELEVANCE_FOOTWEAR and bool(candidates)
     preprocessing = {
         "shoe_isolated": result.shoe_isolated,
@@ -306,21 +355,24 @@ def match_result_to_dict(
     if image is not None:
         preprocessing["crop_jpeg_base64"] = crop_jpeg_base64(image, result.crop)
     verifier = None
-    if footwear:
+    if (footwear or fallback) and candidates:
         verifier = build_verifier_request(
             candidates,
             catalog_rows=list(catalog.rows) if catalog is not None else [],
             verify_top=verify_top,
         )
-    kind = result.image_kind or (IMAGE_KIND_SHOE if footwear else IMAGE_KIND_GARBAGE)
     if kind == IMAGE_KIND_ORDER:
         status = "order"
     elif kind == IMAGE_KIND_DELIVERY:
         status = "delivery_notice"
-    elif kind == IMAGE_KIND_GARBAGE or not footwear:
+    elif kind == IMAGE_KIND_GARBAGE:
         status = "garbage"
-    else:
+    elif kind == IMAGE_KIND_UNKNOWN:
+        status = "needs_verification" if candidates else "uncertain"
+    elif footwear:
         status = "needs_verification"
+    else:
+        status = "garbage"
     return {
         "status": status,
         "match": None,
@@ -331,6 +383,7 @@ def match_result_to_dict(
         "scores": result.scores,
         "embedding_model": result.embedding_model,
         "image_kind": kind,
+        "unknown_fallback": fallback,
         "order": result.order,
         "delivery": result.delivery,
     }

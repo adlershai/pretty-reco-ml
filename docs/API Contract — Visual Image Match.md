@@ -61,7 +61,7 @@ Footwear:
 
 `match` is null until `/match/image/decide`. SigLIP cosine on `candidates` is retrieval similarity, not identity confidence.
 
-When `relevance` is `irrelevant`, `status` is `garbage`, `order`, or `delivery_notice`, `verifier` is null, and `candidates` is empty. `image_kind` is `shoe` | `order` | `delivery_notice` | `garbage`.
+When `image_kind` is `garbage`, `order`, or `delivery_notice`, `verifier` is null and `candidates` is empty. Failed shoe-crop selection or low catalog similarity is not garbage. Inconclusive frames use `image_kind=unknown` with `unknown_fallback=true` and still run product retrieval + identity verification (`status=needs_verification` when candidates exist, otherwise `uncertain`). `image_kind` is `shoe` | `order` | `delivery_notice` | `garbage` | `unknown`.
 
 Whole-image document intent (issues #4 and #7): strong order/delivery evidence (order terminology plus an extractable order number, or a delivery notice with a tracking number) wins even when a product thumbnail is visually identifiable. Weak cosine similarity to an “order” prompt must not steal an ordinary shoe photo. Visual catalog identity is not the final interpretation of an order document. The order number is the authoritative key; CRM looks up products and sizes in the DB.
 
@@ -142,8 +142,8 @@ Acceptance: exactly one verifier `same` without an exclusionary shape/pattern co
 
 ## Responsibility Boundary
 
-Python: isolate → scene (shoe / order / garbage) → SigLIP Top-N only for shoes → verifier prompt/schema → MATCH/UNCERTAIN policy. Order extract is regex on OCR text (no OpenAI).
+Python: isolate → scene (shoe / order / delivery / garbage / unknown) → SigLIP Top-N for shoes and for unknown fallback → verifier prompt/schema → MATCH/UNCERTAIN policy. Garbage requires positive irrelevance vs footwear, not a leftover after a failed crop. Order extract is regex on OCR text (no OpenAI).
 
-Node: WATI download → S3 → `/match/image` → OpenAI Responses (`watiImageIdentity`) only for shoes → `/match/image/decide` → persist `matched` / `uncertain` / `order` / `garbage`.
+Node: WATI download → S3 → `/match/image` → OpenAI Responses (`watiImageIdentity`) for shoes and unknown fallback → `/match/image/decide` → persist `matched` / `uncertain` / `order` / `garbage` / `unknown`. Do not coerce `unknown` to `shoe` or `garbage`.
 
 Do not use SigLIP cosine as a business identity cutoff. Two-tower `like_score` is unchanged.

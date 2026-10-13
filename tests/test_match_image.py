@@ -133,7 +133,71 @@ def test_match_image_skips_catalog_when_no_crop_is_footwear() -> None:
     payload = match_result_to_dict(result, image_size=image.size)
     assert payload["status"] == "garbage"
     assert payload["image_kind"] == "garbage"
+    assert payload["unknown_fallback"] is False
     assert payload["candidates"] == []
+    assert payload["verifier"] is None
+
+
+def test_match_image_unknown_fallback_searches_catalog() -> None:
+    class InconclusiveEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.21, "irrelevant": 0.24}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "shoe", {"footwear": 0.21, "irrelevant": 0.18, "order": 0.05, "garbage": 0.18}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "garbage", {"order": 0.05, "garbage": 0.18, "irrelevant": 0.18}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows(
+        [
+            CatalogImage(
+                model="52026_005",
+                image_type="main",
+                embedding=_unit([0.0, 1.0, 0.0]),
+                model_id=8,
+                embedding_model="google/siglip-base-patch16-224",
+                embedding_dimension=EMBEDDING_DIMENSION,
+            )
+        ]
+    )
+    result = match_image(image, InconclusiveEncoder(), catalog, top=10)
+    assert result.image_kind == "unknown"
+    assert result.unknown_fallback is True
+    assert result.match is not None
+    assert result.match.model == "52026_005"
+    payload = match_result_to_dict(result, image_size=image.size, image=image, catalog=catalog)
+    assert payload["status"] == "needs_verification"
+    assert payload["image_kind"] == "unknown"
+    assert payload["unknown_fallback"] is True
+    assert payload["candidates"][0]["model"] == "52026_005"
+    assert payload["verifier"] is not None
+    assert payload["match"] is None
+
+
+def test_match_image_unknown_without_candidates_is_uncertain() -> None:
+    class InconclusiveEncoder(FakeEncoder):
+        def classify_relevance(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "irrelevant", {"footwear": 0.21, "irrelevant": 0.24}
+
+        def classify_scene(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "shoe", {"footwear": 0.21, "irrelevant": 0.18, "order": 0.05, "garbage": 0.18}
+
+        def classify_non_shoe(self, _vector: np.ndarray) -> tuple[str, dict[str, float]]:
+            return "garbage", {"order": 0.05, "garbage": 0.18, "irrelevant": 0.18}
+
+    image = Image.new("RGB", (200, 200), (236, 228, 230))
+    catalog = CatalogIndex.from_rows([])
+    result = match_image(image, InconclusiveEncoder(), catalog, top=10)
+    assert result.image_kind == "unknown"
+    assert result.match is None
+    assert result.candidates == []
+    payload = match_result_to_dict(result, image_size=image.size)
+    assert payload["status"] == "uncertain"
+    assert payload["image_kind"] == "unknown"
+    assert payload["unknown_fallback"] is True
+    assert payload["verifier"] is None
 
 
 def test_match_image_routes_order_without_catalog_search() -> None:
