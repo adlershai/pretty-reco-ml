@@ -46,6 +46,9 @@ DEFAULT_TOP = 10
 SCORE_TIE = 1e-6
 # Issue #4 WATI set, 2026-09-21: 753/736 max catalog 0.572; 1070 PDP min 0.655.
 CATALOG_SHOE_MIN = 0.62
+# classify_relevance sends equality to footwear. Garbage needs junk/garbage to beat
+# footwear by this margin; a failed shoe label is not positive irrelevance.
+GARBAGE_MARGIN = 0.05
 
 
 def _prefer_crop(score: float, box: CropBox, best_score: float, best_box: CropBox) -> bool:
@@ -142,6 +145,28 @@ def _is_identifiable_shoe(
     return catalog_score >= CATALOG_SHOE_MIN
 
 
+def _junk_score(scores: dict[str, float]) -> float:
+    return max(
+        float(scores.get(IMAGE_KIND_GARBAGE) or 0.0),
+        float(scores.get(RELEVANCE_IRRELEVANT) or 0.0),
+    )
+
+
+def _confident_garbage(scene_kind: str, scores: dict[str, float]) -> bool:
+    """Positive irrelevance: junk beats footwear by GARBAGE_MARGIN.
+
+    A scene label of garbage, or classify_relevance missing footwear, is not enough.
+    Shoe/order/delivery scene labels are never garbage here.
+    """
+    if scene_kind in {IMAGE_KIND_SHOE, IMAGE_KIND_ORDER, IMAGE_KIND_DELIVERY}:
+        return False
+    footwear = float(scores.get(RELEVANCE_FOOTWEAR) or 0.0)
+    junk = _junk_score(scores)
+    if not np.isfinite(footwear) or not np.isfinite(junk):
+        return False
+    return junk >= footwear + GARBAGE_MARGIN
+
+
 def _scene_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[str, float]]:
     classify_scene = getattr(encoder, "classify_scene", None)
     if callable(classify_scene):
@@ -149,7 +174,7 @@ def _scene_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[s
     relevance, scores = encoder.classify_relevance(vector)
     if relevance == RELEVANCE_FOOTWEAR:
         return IMAGE_KIND_SHOE, scores
-    return IMAGE_KIND_GARBAGE, scores
+    return IMAGE_KIND_UNKNOWN, scores
 
 
 def _non_shoe_kind(encoder: VisionEncoder, vector: np.ndarray) -> tuple[str, dict[str, float]]:
@@ -291,7 +316,7 @@ def match_image(
         )
 
     scene_kind, confident_scores = _scene_kind(encoder, vectors[0])
-    if scene_kind == IMAGE_KIND_GARBAGE:
+    if _confident_garbage(scene_kind, confident_scores):
         chosen = boxes[0]
         isolated = isolation_applied(chosen, rgb)
         return ImageMatchResult(
